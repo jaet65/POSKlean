@@ -637,10 +637,6 @@ export default function App() {
             </svg>
             <span>{isLoggingIn ? 'Conectando con Google...' : 'Continuar con Google'}</span>
           </button>
-
-          <div className="pt-2 text-[11px] text-slate-500">
-            Administrador Principal: <span className="font-mono text-cyan-400">agrazmario@gmail.com</span>
-          </div>
         </div>
       </div>
     );
