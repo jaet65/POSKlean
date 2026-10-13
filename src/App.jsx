@@ -15,11 +15,37 @@ import {
   DollarSign,
   Droplet,
   Layers,
-  Printer
+  Printer,
+  Users,
+  ShieldCheck,
+  LogOut,
+  Edit,
+  UserPlus,
+  Lock
+  
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
 import { addProduct as saveNewProduct, restockProduct as saveRestock } from './services/inventoryService';
 import { createSale } from './services/salesService';
+import {
+  DEFAULT_PERMISSIONS,
+  SUPER_ADMIN_EMAIL,
+  addUser as saveUser,
+  deleteUser as removeUser,
+  loginWithGoogle,
+  logoutUser,
+  subscribeAuthState,
+  subscribeToUsers,
+  updateUser as saveUserUpdate,
+} from './services/userService';
+
+const INITIAL_USER_FORM = {
+  email: '',
+  displayName: '',
+  role: 'cajero',
+  permissions: { pos: true, inventory: true, sales: false, users: false },
+  status: 'active',
+};
 
 const PRODUCT_COLORS = [
   { name: 'Cian', class: 'bg-cyan-500' },
@@ -88,6 +114,83 @@ export default function App() {
   const [productFormError, setProductFormError] = useState('');
   const [addProductSuccess, setAddProductSuccess] = useState('');
   const [newProductForm, setNewProductForm] = useState(INITIAL_PRODUCT_FORM);
+
+  // Auth & Permissions State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Users Management State (Admin)
+  const [usersList, setUsersList] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [userForm, setUserForm] = useState(INITIAL_USER_FORM);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [userFormError, setUserFormError] = useState('');
+  const [userSuccessMessage, setUserSuccessMessage] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = subscribeAuthState((profile) => {
+      setCurrentUser(profile);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const canAccessUsers = currentUser?.role === 'admin' 
+    || currentUser?.permissions?.users 
+    || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+
+  const canAccessPos = currentUser?.role === 'admin' || currentUser?.permissions?.pos;
+  const canAccessInventory = currentUser?.role === 'admin' || currentUser?.permissions?.inventory;
+  const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
+
+  useEffect(() => {
+    if (!canAccessUsers) {
+      setUsersList([]);
+      return undefined;
+    }
+    setUsersLoading(true);
+    const unsubscribe = subscribeToUsers(
+      (list) => {
+        setUsersList(list);
+        setUsersLoading(false);
+      },
+      (err) => {
+        setActionError(`Error al cargar usuarios: ${err.message}`);
+        setUsersLoading(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [canAccessUsers]);
+
+  const pendingUsersCount = useMemo(() => {
+    return usersList.filter(u => u.status === 'pending').length;
+  }, [usersList]);
+
+  // Redirigir si la pestaña activa no está permitida para el usuario
+  useEffect(() => {
+    if (!currentUser || currentUser.status !== 'active') return;
+    if (activeTab === 'pos' && !canAccessPos) {
+      if (canAccessInventory) setActiveTab('inventory');
+      else if (canAccessSales) setActiveTab('sales');
+      else if (canAccessUsers) setActiveTab('users');
+    } else if (activeTab === 'inventory' && !canAccessInventory) {
+      if (canAccessPos) setActiveTab('pos');
+      else if (canAccessSales) setActiveTab('sales');
+      else if (canAccessUsers) setActiveTab('users');
+    } else if (activeTab === 'sales' && !canAccessSales) {
+      if (canAccessPos) setActiveTab('pos');
+      else if (canAccessInventory) setActiveTab('inventory');
+      else if (canAccessUsers) setActiveTab('users');
+    } else if (activeTab === 'users' && !canAccessUsers) {
+      if (canAccessPos) setActiveTab('pos');
+      else if (canAccessInventory) setActiveTab('inventory');
+      else if (canAccessSales) setActiveTab('sales');
+    }
+  }, [currentUser, activeTab, canAccessPos, canAccessInventory, canAccessSales, canAccessUsers]);
 
   useEffect(() => {
     if (!saleToPrint) return undefined;
@@ -356,6 +459,223 @@ export default function App() {
     }
   };
 
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError('');
+    try {
+      await loginWithGoogle();
+    } catch (err) {
+      setAuthError(err.message || 'No se pudo iniciar sesión con Google.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+      setCurrentUser(null);
+    } catch (err) {
+      console.error('Error al cerrar sesión:', err);
+    }
+  };
+
+  const handleOpenAddUser = () => {
+    setEditingUser(null);
+    setUserForm(INITIAL_USER_FORM);
+    setUserFormError('');
+    setIsUserModalOpen(true);
+  };
+
+  const handleOpenEditUser = (userToEdit) => {
+    setEditingUser(userToEdit);
+    setUserForm({
+      email: userToEdit.email || '',
+      displayName: userToEdit.displayName || '',
+      role: userToEdit.role || 'cajero',
+      permissions: userToEdit.permissions || DEFAULT_PERMISSIONS[userToEdit.role] || DEFAULT_PERMISSIONS.cajero,
+      status: userToEdit.status || 'active',
+    });
+    setUserFormError('');
+    setIsUserModalOpen(true);
+  };
+
+  const handleCloseUserModal = () => {
+    if (isSavingUser) return;
+    setIsUserModalOpen(false);
+    setEditingUser(null);
+    setUserFormError('');
+  };
+
+  const handleRoleChangeInForm = (newRole) => {
+    const defaultPerms = DEFAULT_PERMISSIONS[newRole] || DEFAULT_PERMISSIONS.custom;
+    setUserForm(prev => ({
+      ...prev,
+      role: newRole,
+      permissions: newRole === 'custom' ? prev.permissions : defaultPerms,
+    }));
+  };
+
+  const handlePermissionToggle = (permKey) => {
+    setUserForm(prev => ({
+      ...prev,
+      role: 'custom',
+      permissions: {
+        ...prev.permissions,
+        [permKey]: !prev.permissions[permKey],
+      },
+    }));
+  };
+
+  const handleSaveUser = async (e) => {
+    e.preventDefault();
+    if (isSavingUser) return;
+    const cleanEmail = userForm.email.toLowerCase().trim();
+    if (!cleanEmail) {
+      setUserFormError('Ingresa un correo electrónico válido.');
+      return;
+    }
+
+    setIsSavingUser(true);
+    setUserFormError('');
+    try {
+      if (editingUser) {
+        await saveUserUpdate(editingUser.id, userForm);
+        setUserSuccessMessage(`Usuario ${cleanEmail} actualizado exitosamente.`);
+      } else {
+        await saveUser(userForm);
+        setUserSuccessMessage(`Usuario ${cleanEmail} registrado exitosamente.`);
+      }
+      setIsUserModalOpen(false);
+      setEditingUser(null);
+      setTimeout(() => setUserSuccessMessage(''), 4000);
+    } catch (err) {
+      setUserFormError(err.message || 'Error al guardar usuario.');
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async (userToDelete) => {
+    if (userToDelete.email?.toLowerCase() === SUPER_ADMIN_EMAIL) {
+      alert('No es posible eliminar al Administrador Principal (agrazmario@gmail.com).');
+      return;
+    }
+    if (!window.confirm(`¿Estás seguro de eliminar el acceso para "${userToDelete.displayName || userToDelete.email}"?`)) {
+      return;
+    }
+    try {
+      await removeUser(userToDelete.id, userToDelete.email);
+      setUserSuccessMessage(`Usuario ${userToDelete.email} eliminado.`);
+      setTimeout(() => setUserSuccessMessage(''), 4000);
+    } catch (err) {
+      setActionError(err.message || 'No se pudo eliminar el usuario.');
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mb-4" />
+        <p className="text-sm text-slate-400 font-medium font-mono">Iniciando POSKlean...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 text-center">
+          <div className="inline-flex p-3.5 bg-linear-to-r from-cyan-500 to-blue-600 rounded-2xl shadow-lg shadow-cyan-500/20 mx-auto">
+            <Droplet className="w-9 h-9 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight">
+              POS<span className="text-cyan-400">Klean</span>
+            </h1>
+            <p className="text-xs text-slate-400 mt-1 font-medium">Control de Inventarios • Punto de Venta</p>
+          </div>
+
+          <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700/60 space-y-2">
+            <div className="flex items-center justify-center gap-2 text-cyan-400 text-xs font-semibold">
+              <Lock className="w-4 h-4" />
+              <span>Control de Acceso Seguro</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Inicia sesión con tu cuenta de Google para acceder a las operaciones del negocio.
+            </p>
+          </div>
+
+          {authError && (
+            <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs text-left">
+              {authError}
+            </div>
+          )}
+
+          <button
+            onClick={handleLogin}
+            disabled={isLoggingIn}
+            className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-sm transition shadow-lg shadow-white/10 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <path
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+              />
+            </svg>
+            <span>{isLoggingIn ? 'Conectando con Google...' : 'Continuar con Google'}</span>
+          </button>
+
+          <div className="pt-2 text-[11px] text-slate-500">
+            Administrador Principal: <span className="font-mono text-cyan-400">agrazmario@gmail.com</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentUser.status !== 'active') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 text-center">
+          <div className="inline-flex p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-2xl mx-auto">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white">Acceso Pendiente de Aprobación</h2>
+            <p className="text-xs text-slate-400 mt-2">
+              Has iniciado sesión como <strong className="text-cyan-300 font-mono">{currentUser.email}</strong>.
+            </p>
+          </div>
+          <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/60 text-xs text-slate-300 text-left space-y-2">
+            <p>Tu cuenta aún no tiene permisos activos asignados en POSKlean.</p>
+            <p>Ponte en contacto con el Administrador para que active tu cuenta:</p>
+            <p className="font-mono text-cyan-400 font-semibold">{SUPER_ADMIN_EMAIL}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-2xl text-xs transition border border-slate-700 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Cerrar Sesión / Usar Otra Cuenta</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       
@@ -374,7 +694,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Global Quick Metrics */}
+        {/* Global Quick Metrics & User Info */}
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-2 bg-slate-900/80 border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
             <Layers className="w-4 h-4 text-cyan-400" />
@@ -390,50 +710,114 @@ export default function App() {
             <AlertTriangle className="w-4 h-4" />
             <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
           </div>
+
+          {/* User Profile Badge */}
+          <div className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl">
+            {currentUser.photoURL ? (
+              <img
+                src={currentUser.photoURL}
+                alt={currentUser.displayName}
+                className="w-7 h-7 rounded-full border border-slate-600 object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs border border-cyan-500/30">
+                {(currentUser.displayName || currentUser.email || 'U')[0].toUpperCase()}
+              </div>
+            )}
+            <div className="hidden sm:block text-left pr-1">
+              <p className="text-xs font-semibold text-slate-200 leading-tight truncate max-w-32.5">
+                {currentUser.displayName || currentUser.email.split('@')[0]}
+              </p>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
+                currentUser.role === 'admin' ? 'bg-purple-500/20 text-purple-300' :
+                currentUser.role === 'supervisor' ? 'bg-blue-500/20 text-blue-300' :
+                'bg-emerald-500/20 text-emerald-300'
+              }`}>
+                {currentUser.role === 'admin' ? 'Admin' : currentUser.role}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Cerrar Sesión"
+              className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg transition hover:bg-slate-800 cursor-pointer ml-0.5"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* View Switcher Tabs */}
         <nav className="flex bg-slate-900 p-1 rounded-xl border border-slate-700/80 w-full md:w-auto">
-          <button
-            onClick={() => setActiveTab('pos')}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'pos' 
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <ShoppingCart className="w-4 h-4" />
-            <span>Punto de Venta</span>
-          </button>
+          {canAccessPos && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('pos')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'pos' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <ShoppingCart className="w-4 h-4" />
+              <span>Punto de Venta</span>
+            </button>
+          )}
           
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
-              activeTab === 'inventory' 
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Inventario</span>
-            {lowStockCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900">
-                {lowStockCount}
-              </span>
-            )}
-          </button>
+          {canAccessInventory && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('inventory')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+                activeTab === 'inventory' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>Inventario</span>
+              {lowStockCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900">
+                  {lowStockCount}
+                </span>
+              )}
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveTab('sales')}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'sales' 
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            <span>Ventas / Reporte</span>
-          </button>
+          {canAccessSales && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('sales')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'sales' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>Ventas / Reporte</span>
+            </button>
+          )}
+
+          {canAccessUsers && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('users')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+                activeTab === 'users' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Usuarios</span>
+              {pendingUsersCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
+                  {pendingUsersCount}
+                </span>
+              )}
+            </button>
+          )}
         </nav>
       </header>
 
@@ -454,7 +838,7 @@ export default function App() {
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
 
         {/* TAB 1: PUNTO DE VENTA (POS) */}
-        {activeTab === 'pos' && (
+        {activeTab === 'pos' && canAccessPos && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
             
             {/* Catalog & Quick Add (Left Column - 7/12) */}
@@ -719,7 +1103,7 @@ export default function App() {
         )}
 
         {/* TAB 2: INVENTARIO & RESURTIDO */}
-        {activeTab === 'inventory' && (
+        {activeTab === 'inventory' && canAccessInventory && (
           <div className="space-y-5">
             {addProductSuccess && (
               <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
@@ -1163,7 +1547,7 @@ export default function App() {
         )}
 
         {/* TAB 3: VENTAS Y REPORTE DIARIO */}
-        {activeTab === 'sales' && (
+        {activeTab === 'sales' && canAccessSales && (
           <div className="space-y-5">
             
             {/* Sales Summary Cards */}
@@ -1280,12 +1664,425 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
+        {activeTab === 'users' && canAccessUsers && (
+          <div className="space-y-5">
+            {userSuccessMessage && (
+              <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <span>{userSuccessMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUserSuccessMessage('')}
+                  className="text-emerald-400 hover:text-white text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 font-medium">Total de Usuarios</p>
+                  <p className="text-2xl font-bold text-white font-mono">{usersList.length}</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 font-medium">Administradores</p>
+                  <p className="text-2xl font-bold text-white font-mono">
+                    {usersList.filter(u => u.role === 'admin' || u.email === SUPER_ADMIN_EMAIL).length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                <div className={`p-3 rounded-xl border ${
+                  pendingUsersCount > 0 
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 animate-pulse' 
+                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                }`}>
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 font-medium">Pendientes de Aprobación</p>
+                  <p className={`text-2xl font-bold font-mono ${pendingUsersCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {pendingUsersCount}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Users Table */}
+            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
+              <div className="p-4 border-b border-slate-700 flex justify-between items-center flex-wrap gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                    Directorio de Usuarios y Permisos
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Permite a los administradores conceder o revocar accesos en tiempo real
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddUser}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Nuevo Usuario</span>
+                </button>
+              </div>
+
+              {usersLoading && (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  Cargando directorio de usuarios...
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
+                    <tr>
+                      <th className="px-4 py-3">Usuario</th>
+                      <th className="px-4 py-3">Rol</th>
+                      <th className="px-4 py-3">Permisos Activos</th>
+                      <th className="px-4 py-3">Estado</th>
+                      <th className="px-4 py-3">Último Acceso</th>
+                      <th className="px-4 py-3 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    {usersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                          <Users className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                          <p className="font-semibold text-slate-200 text-sm">No hay usuarios registrados</p>
+                          <p className="text-xs text-slate-400 mt-1">
+                            Agrega colaboradores para asignarles acceso al Punto de Venta o Inventario.
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      usersList.map(u => {
+                        const isMainAdmin = u.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+                        const perms = u.permissions || {};
+                        return (
+                          <tr key={u.id || u.email} className="hover:bg-slate-700/30 transition">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                {u.photoURL ? (
+                                  <img src={u.photoURL} alt={u.displayName} className="w-8 h-8 rounded-full border border-slate-600 object-cover" />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-slate-700 text-cyan-300 flex items-center justify-center font-bold text-xs border border-slate-600">
+                                    {(u.displayName || u.email || 'U')[0].toUpperCase()}
+                                  </div>
+                                )}
+                                <div>
+                                  <p className="font-semibold text-slate-100 flex items-center gap-1.5">
+                                    <span>{u.displayName || 'Sin nombre'}</span>
+                                    {isMainAdmin && (
+                                      <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-md font-bold">
+                                        Super Admin
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-slate-400 text-[11px] font-mono">{u.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                u.role === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
+                                u.role === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                                u.role === 'cajero' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
+                                'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              }`}>
+                                {u.role === 'admin' ? 'Administrador' :
+                                 u.role === 'supervisor' ? 'Supervisor' :
+                                 u.role === 'cajero' ? 'Cajero' : 'Personalizado'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap gap-1">
+                                {perms.pos && (
+                                  <span className="bg-slate-900 border border-slate-700 text-cyan-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                    POS
+                                  </span>
+                                )}
+                                {perms.inventory && (
+                                  <span className="bg-slate-900 border border-slate-700 text-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                    Inventario
+                                  </span>
+                                )}
+                                {perms.sales && (
+                                  <span className="bg-slate-900 border border-slate-700 text-blue-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                    Ventas
+                                  </span>
+                                )}
+                                {perms.users && (
+                                  <span className="bg-slate-900 border border-slate-700 text-purple-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                    Usuarios
+                                  </span>
+                                )}
+                                {!perms.pos && !perms.inventory && !perms.sales && !perms.users && (
+                                  <span className="text-slate-500 text-[11px] italic">Sin permisos</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                u.status === 'active' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
+                                u.status === 'pending' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse' :
+                                'bg-red-500/15 text-red-300 border-red-500/30'
+                              }`}>
+                                {u.status === 'active' ? '● Activo' :
+                                 u.status === 'pending' ? '▲ Pendiente' : '✕ Inactivo'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                              {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('es-MX', {
+                                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                              }) : 'Nunca'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditUser(u)}
+                                  className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
+                                  title="Editar usuario y permisos"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                  <span>Editar</span>
+                                </button>
+                                {!isMainAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteUser(u)}
+                                    className="bg-slate-700/60 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40 text-slate-400 p-1.5 rounded-lg transition border border-slate-700 cursor-pointer"
+                                    title="Eliminar usuario"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        )}
+
       </main>
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
         POSKlean • Gestión de inventarios y punto de venta integral. • 
       </footer>
+
+      {/* Modal for Add / Edit User */}
+      {isUserModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto font-sans">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
+            <div className="flex justify-between items-center border-b border-slate-700 pb-3">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                {editingUser ? 'Editar Usuario y Permisos' : 'Agregar Nuevo Usuario'}
+              </h3>
+              <button
+                type="button"
+                onClick={handleCloseUserModal}
+                className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {userFormError && (
+              <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs">
+                {userFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveUser} className="space-y-4">
+              {/* Correo Electrónico */}
+              <div>
+                <label className="text-xs text-slate-300 block mb-1 font-medium">
+                  Correo Electrónico (Cuenta Google): <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  type="email"
+                  placeholder="ejemplo@gmail.com"
+                  required
+                  disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                  value={userForm.email}
+                  onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                />
+                {editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    El correo del Administrador Principal no puede modificarse.
+                  </p>
+                )}
+              </div>
+
+              {/* Nombre Completo */}
+              <div>
+                <label className="text-xs text-slate-300 block mb-1 font-medium">
+                  Nombre Completo: <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. Juan Pérez"
+                  required
+                  value={userForm.displayName}
+                  onChange={(e) => setUserForm(prev => ({ ...prev, displayName: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+
+              {/* Rol y Estado */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1 font-medium">
+                    Rol Asignado:
+                  </label>
+                  <select
+                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                    value={userForm.role}
+                    onChange={(e) => handleRoleChangeInForm(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                  >
+                    <option value="admin">Administrador (Acceso Total)</option>
+                    <option value="supervisor">Supervisor (POS, Inv., Ventas)</option>
+                    <option value="cajero">Cajero (POS e Inv.)</option>
+                    <option value="custom">Personalizado (Manual)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1 font-medium">
+                    Estado de la Cuenta:
+                  </label>
+                  <select
+                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                    value={userForm.status}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, status: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                  >
+                    <option value="active">Activo (Permite acceso)</option>
+                    <option value="inactive">Inactivo (Acceso bloqueado)</option>
+                    <option value="pending">Pendiente (En revisión)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Permisos Granulares */}
+              <div>
+                <label className="text-xs text-slate-300 block mb-2 font-medium">
+                  Permisos de Acceso al Sistema:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-900/90 p-3.5 rounded-xl border border-slate-700/80">
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(userForm.permissions?.pos)}
+                      onChange={() => handlePermissionToggle('pos')}
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                    />
+                    <div>
+                      <p className="font-semibold text-white">Punto de Venta</p>
+                      <p className="text-[11px] text-slate-400">Despacho, cobro y tickets</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(userForm.permissions?.inventory)}
+                      onChange={() => handlePermissionToggle('inventory')}
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                    />
+                    <div>
+                      <p className="font-semibold text-white">Inventario</p>
+                      <p className="text-[11px] text-slate-400">Ver stock, resurtir y productos</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(userForm.permissions?.sales)}
+                      onChange={() => handlePermissionToggle('sales')}
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                    />
+                    <div>
+                      <p className="font-semibold text-white">Ventas y Reportes</p>
+                      <p className="text-[11px] text-slate-400">Historial y métricas de dinero</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(userForm.permissions?.users)}
+                      onChange={() => handlePermissionToggle('users')}
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                    />
+                    <div>
+                      <p className="font-semibold text-white">Gestión de Usuarios</p>
+                      <p className="text-[11px] text-slate-400">Administrar cuentas y roles</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Botones del Modal */}
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-700">
+                <button
+                  type="button"
+                  onClick={handleCloseUserModal}
+                  disabled={isSavingUser}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingUser}
+                  className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {isSavingUser ? 'Guardando...' : editingUser ? 'Actualizar Usuario' : 'Crear Usuario'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {saleToPrint && (
         <section className={`print-ticket receipt-${receiptWidth}`} aria-label="Ticket para imprimir">
