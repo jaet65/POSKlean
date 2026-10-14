@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export async function addProduct(productData, user = null) {
@@ -133,6 +133,30 @@ export async function restockProduct(productId, amount, user = null) {
       createdBy: userInfo,
       timestamp: serverTimestamp(),
     });
+  });
+}
+
+export async function updateProductMinStock(productId, minStock, user = null) {
+  if (!db) {
+    throw new Error('No se puede actualizar el mínimo: configura primero Firebase.');
+  }
+  if (user?.role !== 'admin') {
+    throw new Error('Solo un administrador puede editar el mínimo de alerta.');
+  }
+  if (!productId || !Number.isFinite(minStock) || minStock < 0
+    || Number((minStock * 100).toFixed(0)) / 100 !== minStock) {
+    throw new Error('Indica un mínimo de alerta válido con máximo dos decimales.');
+  }
+
+  await updateDoc(doc(db, 'products', productId), {
+    minStock: Number(minStock.toFixed(2)),
+    minStockUpdatedBy: {
+      userId: user.id || user.uid || null,
+      userName: user.displayName || user.username || user.email || 'Desconocido',
+      userEmail: user.email || '',
+      userRole: user.role,
+    },
+    minStockUpdatedAt: serverTimestamp(),
   });
 }
 

@@ -27,7 +27,11 @@ import {
   History,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
-import { addProduct as saveNewProduct, restockProduct as saveRestock } from './services/inventoryService';
+import {
+  addProduct as saveNewProduct,
+  restockProduct as saveRestock,
+  updateProductMinStock as saveMinStock,
+} from './services/inventoryService';
 import { createSale } from './services/salesService';
 import {
   DEFAULT_PERMISSIONS,
@@ -114,6 +118,10 @@ export default function App() {
   const [restockProduct, setRestockProduct] = useState(null);
   const [restockAmount, setRestockAmount] = useState('');
   const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
+  const [movementTypeFilter, setMovementTypeFilter] = useState('all');
+  const [editingMinStockProductId, setEditingMinStockProductId] = useState(null);
+  const [minStockDraft, setMinStockDraft] = useState('');
+  const [isSavingMinStock, setIsSavingMinStock] = useState(false);
 
   // Add Product Modal State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -152,6 +160,7 @@ export default function App() {
     || currentUser?.permissions?.users 
     || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
 
+  const isAdmin = currentUser?.role === 'admin';
   const canAccessPos = currentUser?.role === 'admin' || currentUser?.permissions?.pos;
   const canAccessInventory = currentUser?.role === 'admin' || currentUser?.permissions?.inventory;
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
@@ -231,9 +240,16 @@ export default function App() {
     );
   }, [salesToday, isCajero, currentUserId]);
 
-  const lowStockCount = useMemo(() => {
-    return products.filter(p => p.currentStock <= p.minStock).length;
+  const lowStockProducts = useMemo(() => {
+    return products.filter((product) => product.currentStock <= product.minStock);
   }, [products]);
+  const lowStockCount = lowStockProducts.length;
+
+  const filteredMovements = useMemo(() => (
+    movementTypeFilter === 'all'
+      ? movements
+      : movements.filter((movement) => movement.type === movementTypeFilter)
+  ), [movements, movementTypeFilter]);
 
   const totalLitersInStock = useMemo(() => {
     return products.reduce((acc, p) => acc + p.currentStock, 0);
@@ -373,6 +389,29 @@ export default function App() {
       setActionError(error.message || 'No se pudo actualizar el inventario.');
     } finally {
       setIsRestocking(false);
+    }
+  };
+
+  const handleSaveMinStock = async (event, productId) => {
+    event.preventDefault();
+    const minStock = parseFloat(minStockDraft);
+    if (!isAdmin || isSavingMinStock) return;
+    if (!Number.isFinite(minStock) || minStock < 0
+      || Number((minStock * 100).toFixed(0)) / 100 !== minStock) {
+      setActionError('Indica un mínimo de alerta válido con máximo dos decimales.');
+      return;
+    }
+
+    setActionError('');
+    setIsSavingMinStock(true);
+    try {
+      await saveMinStock(productId, minStock, currentUser);
+      setEditingMinStockProductId(null);
+      setMinStockDraft('');
+    } catch (error) {
+      setActionError(error.message || 'No se pudo actualizar el mínimo de alerta.');
+    } finally {
+      setIsSavingMinStock(false);
     }
   };
 
@@ -978,6 +1017,27 @@ export default function App() {
       )}
 
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
+        {canAccessInventory && lowStockCount > 0 && (
+          <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold">Alerta: stock mínimo alcanzado</p>
+              <p className="mt-1 text-xs text-amber-100/80">
+                {lowStockProducts.slice(0, 3).map((product) =>
+                  `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
+                ).join(' · ')}
+                {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('inventory')}
+              className="shrink-0 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/15"
+            >
+              Ver inventario
+            </button>
+          </div>
+        )}
 
         {/* TAB 1: PUNTO DE VENTA (POS) */}
         {visibleTab === 'pos' && canAccessPos && (
@@ -1255,7 +1315,7 @@ export default function App() {
                     <Package className="w-5 h-5 text-cyan-400" />
                     Control de Tanques y Porrones
                   </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Punto de reorden automático configurado</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1312,6 +1372,15 @@ export default function App() {
                     ) : (
                       products.map(p => {
                         const isLow = p.currentStock <= p.minStock;
+                        const stockScaleMax = p.minStock > 0
+                          ? p.minStock * 1.5
+                          : Math.max(p.currentStock, 1);
+                        const stockFillPercent = Math.min((p.currentStock / stockScaleMax) * 100, 100);
+                        const stockBarColor = isLow
+                          ? 'bg-red-400'
+                          : p.currentStock <= p.minStock * 1.5
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-400';
                         return (
                           <tr key={p.id} className="hover:bg-slate-700/30 transition">
                             <td className="px-4 py-3 font-semibold text-slate-100 flex items-center gap-2">
@@ -1320,15 +1389,91 @@ export default function App() {
                             </td>
                             <td className="px-4 py-3 text-slate-400">{p.category}</td>
                             <td className="px-4 py-3 font-mono font-bold">
-                              <span className={`px-2 py-0.5 rounded-md border ${
-                                isLow 
-                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse' 
-                                  : 'bg-slate-900 text-slate-200 border-slate-700'
-                              }`}>
-                                {p.currentStock} {p.unit}
-                              </span>
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span className={`px-2 py-0.5 rounded-md border ${
+                                  isLow 
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse' 
+                                    : 'bg-slate-900 text-slate-200 border-slate-700'
+                                }`}>
+                                  {p.currentStock} {p.unit}
+                                </span>
+                                <div
+                                  role="meter"
+                                  aria-label={`Nivel de stock de ${p.name}`}
+                                  aria-valuemin={0}
+                                  aria-valuemax={stockScaleMax}
+                                  aria-valuenow={Math.min(p.currentStock, stockScaleMax)}
+                                  aria-valuetext={`${p.currentStock} ${p.unit}; mínimo ${p.minStock} ${p.unit}`}
+                                  title={`Stock: ${p.currentStock} ${p.unit} · Mínimo: ${p.minStock} ${p.unit}`}
+                                  className="relative h-1.5 w-20 rounded-full bg-slate-700"
+                                >
+                                  <div
+                                    className={`h-full rounded-full ${stockBarColor}`}
+                                    style={{ width: `${stockFillPercent}%` }}
+                                  />
+                                  {p.minStock > 0 && (
+                                    <span
+                                      aria-hidden="true"
+                                      className="pointer-events-none absolute inset-y-0 w-0.5 bg-white/90"
+                                      style={{ left: `${(p.minStock / stockScaleMax) * 100}%` }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-4 py-3 font-mono text-slate-400">{p.minStock} {p.unit}</td>
+                            <td className="px-4 py-3 font-mono text-slate-400">
+                              {isAdmin && editingMinStockProductId === p.id ? (
+                                <form
+                                  onSubmit={(event) => handleSaveMinStock(event, p.id)}
+                                  className="flex items-center gap-1.5"
+                                >
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    aria-label={`Mínimo de alerta para ${p.name}`}
+                                    value={minStockDraft}
+                                    onChange={(event) => setMinStockDraft(event.target.value)}
+                                    className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-cyan-400"
+                                  />
+                                  <span>{p.unit}</span>
+                                  <button
+                                    type="submit"
+                                    disabled={isSavingMinStock}
+                                    aria-label="Guardar mínimo de alerta"
+                                    className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingMinStock}
+                                    onClick={() => setEditingMinStockProductId(null)}
+                                    aria-label="Cancelar edición del mínimo"
+                                    className="text-slate-400 hover:text-white disabled:opacity-50"
+                                  >
+                                    ✕
+                                  </button>
+                                </form>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span>{p.minStock} {p.unit}</span>
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingMinStockProductId(p.id);
+                                        setMinStockDraft(String(p.minStock));
+                                      }}
+                                      aria-label={`Editar mínimo de alerta para ${p.name}`}
+                                      className="text-slate-500 hover:text-cyan-300"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td className="px-4 py-3 font-mono">${p.cost.toFixed(2)}</td>
                             <td className="px-4 py-3 font-mono text-cyan-400 font-bold">${p.price.toFixed(2)}</td>
                             <td className="px-4 py-3 text-right">
@@ -1366,9 +1511,27 @@ export default function App() {
                       ✕
                     </button>
                   </div>
-                  <div className="overflow-y-auto p-5">
+                  <div className="overflow-y-auto p-5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label htmlFor="inventory-movement-filter" className="text-xs font-medium text-slate-300">
+                        Tipo de movimiento
+                      </label>
+                      <select
+                        id="inventory-movement-filter"
+                        value={movementTypeFilter}
+                        onChange={(event) => setMovementTypeFilter(event.target.value)}
+                        className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
+                      >
+                        <option value="all">Todos</option>
+                        <option value="initial">Alta de producto</option>
+                        <option value="restock">Resurtido</option>
+                        <option value="sale">Venta</option>
+                      </select>
+                    </div>
                     {movements.length === 0 ? (
                       <p className="text-sm text-slate-400 text-center py-10">Aún no hay movimientos registrados.</p>
+                    ) : filteredMovements.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-10">No hay movimientos de este tipo.</p>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[650px] text-left text-xs text-slate-300">
@@ -1382,7 +1545,7 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-700/60">
-                            {movements.map((movement) => {
+                            {filteredMovements.map((movement) => {
                               const movementLabel = movement.type === 'restock'
                                 ? 'Resurtido'
                                 : movement.type === 'sale'
@@ -1585,8 +1748,12 @@ export default function App() {
                           required
                           value={newProductForm.minStock}
                           onChange={(e) => setNewProductForm(prev => ({ ...prev, minStock: e.target.value }))}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono text-amber-300 focus:outline-none focus:border-cyan-400"
+                          readOnly={!isAdmin}
+                          className={`w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono text-amber-300 focus:outline-none focus:border-cyan-400 ${!isAdmin ? 'opacity-60' : ''}`}
                         />
+                        {!isAdmin && (
+                          <p className="text-[10px] text-slate-500 mt-1">Solo un administrador puede cambiar este valor.</p>
+                        )}
                       </div>
                     </div>
 
