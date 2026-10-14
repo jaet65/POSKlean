@@ -330,10 +330,6 @@ export default function App() {
       : movements.filter((movement) => movement.type === movementTypeFilter)
   ), [movements, movementTypeFilter]);
 
-  const totalLitersInStock = useMemo(() => {
-    return products.reduce((acc, p) => acc + p.currentStock, 0);
-  }, [products]);
-
   const inventoryValueAtCost = useMemo(() => {
     return products.reduce((acc, product) => acc + (product.currentStock * product.cost), 0);
   }, [products]);
@@ -984,7 +980,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       
       {/* Top Navbar */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
+      <header className="relative bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
         <div className="flex items-center space-x-3">
           <div className="bg-linear-to-r from-cyan-500 to-blue-600 p-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
             <Droplet className="w-6 h-6 text-white" />
@@ -999,13 +995,7 @@ export default function App() {
         </div>
 
         {/* Global Quick Metrics & User Info */}
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 bg-slate-900/80 border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
-            <Layers className="w-4 h-4 text-cyan-400" />
-            <span className="text-slate-400">Stock Total:</span>
-            <span className="font-bold text-slate-200">{totalLitersInStock.toFixed(1)} L</span>
-          </div>
-
+        <div className="flex items-center gap-3 ml-4 mr-auto">
           <div className={`flex items-center gap-2 border px-3 py-1.5 rounded-lg text-xs font-semibold ${
             lowStockCount > 0 
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse' 
@@ -1015,8 +1005,30 @@ export default function App() {
             <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
           </div>
 
+          {canAccessInventory && lowStockCount > 0 && (
+            <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold">Alerta: stock mínimo alcanzado</p>
+                <p className="mt-1 text-[10px] text-amber-100/80">
+                  {lowStockProducts.slice(0, 3).map((product) =>
+                    `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
+                  ).join(' · ')}
+                  {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('inventory')}
+                className="shrink-0 rounded-lg border border-amber-500/40 px-2 py-1 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-500/15"
+              >
+                Ver inventario
+              </button>
+            </div>
+          )}
+
           {/* User Profile Badge */}
-          <div className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl">
+          <div className="absolute top-3 right-4 z-10 flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl">
             {currentUser.photoURL ? (
               <img
                 src={currentUser.photoURL}
@@ -1052,7 +1064,7 @@ export default function App() {
         </div>
 
         {/* View Switcher Tabs */}
-        <nav className="flex bg-slate-900 p-1 rounded-xl border border-slate-700/80 w-full md:w-auto">
+        <nav className="flex w-full bg-slate-900 p-1 rounded-xl border border-slate-700/80">
           {canAccessPos && (
             <button
               type="button"
@@ -1140,28 +1152,6 @@ export default function App() {
       )}
 
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
-        {canAccessInventory && lowStockCount > 0 && (
-          <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold">Alerta: stock mínimo alcanzado</p>
-              <p className="mt-1 text-xs text-amber-100/80">
-                {lowStockProducts.slice(0, 3).map((product) =>
-                  `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
-                ).join(' · ')}
-                {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab('inventory')}
-              className="shrink-0 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/15"
-            >
-              Ver inventario
-            </button>
-          </div>
-        )}
-
         {/* TAB 1: PUNTO DE VENTA (POS) */}
         {visibleTab === 'pos' && canAccessPos && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
