@@ -334,6 +334,14 @@ export default function App() {
     return products.reduce((acc, p) => acc + p.currentStock, 0);
   }, [products]);
 
+  const inventoryValueAtCost = useMemo(() => {
+    return products.reduce((acc, product) => acc + (product.currentStock * product.cost), 0);
+  }, [products]);
+
+  const inventoryValueAtSalePrice = useMemo(() => {
+    return products.reduce((acc, product) => acc + (product.currentStock * product.price), 0);
+  }, [products]);
+
   const availableCategories = useMemo(() => {
     const defaultCats = ['Jabón', 'Suavizante'];
     const cats = new Set(defaultCats);
@@ -1395,21 +1403,27 @@ export default function App() {
                 <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
                   <Layers className="w-6 h-6" />
                 </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Volumen Total en Local</p>
-                  <p className="text-2xl font-bold text-white font-mono">{totalLitersInStock.toFixed(1)} L</p>
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
+                  <p className="text-sm font-bold text-orange-400 font-mono">Compra: ${inventoryValueAtCost.toFixed(2)} MXN</p>
+                  <p className="text-sm font-bold text-emerald-400 font-mono">Venta: ${inventoryValueAtSalePrice.toFixed(2)} MXN</p>
+                  <p className="text-sm font-bold text-purple-400 font-mono">
+                    Ganancia: ${(inventoryValueAtSalePrice - inventoryValueAtCost).toFixed(2)} MXN
+                  </p>
                 </div>
               </div>
 
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                  <AlertTriangle className="w-6 h-6" />
+              {lowStockCount > 0 && (
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Productos por Resurtir</p>
+                    <p className="text-2xl font-bold text-amber-400 font-mono">{lowStockCount}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Productos por Resurtir</p>
-                  <p className="text-2xl font-bold text-amber-400 font-mono">{lowStockCount}</p>
-                </div>
-              </div>
+              )}
 
               <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
                 <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
@@ -1428,7 +1442,7 @@ export default function App() {
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <Package className="w-5 h-5 text-cyan-400" />
-                    Control de Tanques y Porrones
+                    Control de Inventario
                   </h2>
                   <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
                 </div>
