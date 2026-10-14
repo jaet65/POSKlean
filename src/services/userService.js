@@ -286,7 +286,17 @@ export function subscribeToUsers(callback, onError) {
   );
 }
 
-export async function addUser({ username, password, email, displayName, role, permissions, status, authType = 'credentials' }) {
+export async function addUser({
+  username,
+  password,
+  email,
+  displayName,
+  role,
+  permissions,
+  status,
+  storeId,
+  authType = 'credentials',
+}) {
   if (!db) throw new Error('Firestore no está inicializado.');
   
   const cleanUsername = (username || '').toLowerCase().trim();
@@ -321,6 +331,7 @@ export async function addUser({ username, password, email, displayName, role, pe
       role: resolvedRole,
       permissions: resolvedPermissions,
       status: status || 'active',
+      storeId: resolvedRole === 'cajero' ? storeId || '' : '',
       createdAt: new Date().toISOString(),
     };
 
@@ -348,6 +359,7 @@ export async function addUser({ username, password, email, displayName, role, pe
       role: cleanEmail === SUPER_ADMIN_EMAIL ? 'admin' : resolvedRole,
       permissions: cleanEmail === SUPER_ADMIN_EMAIL ? DEFAULT_PERMISSIONS.admin : resolvedPermissions,
       status: status || 'active',
+      storeId: resolvedRole === 'cajero' ? storeId || '' : '',
       createdAt: new Date().toISOString(),
     };
 
@@ -407,4 +419,3 @@ export async function deleteUser(userId, email) {
   }
   await deleteDoc(doc(db, 'users', userId));
 }
-

@@ -30,6 +30,7 @@ import {
 import { usePOSData } from './hooks/usePOSData';
 import {
   addProduct as saveNewProduct,
+  deleteProduct as removeProduct,
   restockProduct as saveRestock,
   updateProductMinStock as saveMinStock,
   completeInventoryAudit as saveInventoryAudit,
@@ -47,6 +48,11 @@ import {
   subscribeToUsers,
   updateUser as saveUserUpdate,
 } from './services/userService';
+import {
+  addStore as saveStore,
+  ensureDefaultStore,
+  subscribeToStores,
+} from './services/storeService';
 
 const INITIAL_USER_FORM = {
   authType: 'credentials', // 'credentials' | 'google'
@@ -58,6 +64,7 @@ const INITIAL_USER_FORM = {
   role: 'cajero',
   permissions: { pos: true, inventory: true, sales: true, users: false },
   status: 'active',
+  storeId: '',
 };
 
 const PRODUCT_COLORS = [
@@ -98,10 +105,15 @@ const INITIAL_DAY_RANGE = getCurrentDayRange();
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
-  const { products, sales: salesHistory, movements, loading, error: dataError } = usePOSData();
+  const [stores, setStores] = useState([]);
+  const [selectedStoreId, setSelectedStoreId] = useState(null);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [storeError, setStoreError] = useState('');
+  const [isSavingStore, setIsSavingStore] = useState(false);
   const [actionError, setActionError] = useState('');
   const [isSavingSale, setIsSavingSale] = useState(false);
   const [isRestocking, setIsRestocking] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState(null);
   const [saleToPrint, setSaleToPrint] = useState(null);
   const [cashClosureToPrint, setCashClosureToPrint] = useState(null);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
@@ -119,11 +131,14 @@ export default function App() {
   // Inventory Modal State
   const [isRestockOpen, setIsRestockOpen] = useState(false);
   const [restockProduct, setRestockProduct] = useState(null);
+  const [restockStoreId, setRestockStoreId] = useState('');
   const [restockAmount, setRestockAmount] = useState('');
+  const [restockError, setRestockError] = useState('');
+  const [canCreateMissingRestockProduct, setCanCreateMissingRestockProduct] = useState(false);
   const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
+  const [inventoryTargetStoreId, setInventoryTargetStoreId] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
   const [isInventoryAuditOpen, setIsInventoryAuditOpen] = useState(false);
-  const [inventoryAuditType, setInventoryAuditType] = useState('weekly');
   const [inventoryAuditCounts, setInventoryAuditCounts] = useState({});
   const [isSavingInventoryAudit, setIsSavingInventoryAudit] = useState(false);
   const [inventoryAuditError, setInventoryAuditError] = useState('');
@@ -147,6 +162,11 @@ export default function App() {
   const [loginMode, setLoginMode] = useState('credentials'); // 'credentials' | 'google'
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const { products, sales: salesHistory, movements, loading, error: dataError } = usePOSData(
+    currentUser?.role === 'cajero' ? currentUser?.storeId : selectedStoreId,
+    Boolean(currentUser?.status === 'active'
+      && (currentUser?.role !== 'cajero' || currentUser?.storeId)),
+  );
 
   // Users Management State (Admin)
   const [usersList, setUsersList] = useState([]);
@@ -159,6 +179,7 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = subscribeAuthState((profile) => {
+      setSelectedStoreId(null);
       setCurrentUser(profile);
       setAuthLoading(false);
     });
@@ -174,8 +195,28 @@ export default function App() {
   const canAccessInventory = currentUser?.role === 'admin' || currentUser?.permissions?.inventory;
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
   const currentUserId = currentUser?.id || currentUser?.uid || null;
+  const isStoreManager = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
+  const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
+  const isGeneralView = isStoreManager && !selectedStoreId;
+  const canUsePos = canAccessPos && !isGeneralView;
   const [usersLoadedForUserId, setUsersLoadedForUserId] = useState(null);
   const usersLoading = Boolean(canAccessUsers && usersLoadedForUserId !== (currentUserId || 'unknown'));
+
+  useEffect(() => {
+    if (!currentUser || currentUser.status !== 'active') {
+      return undefined;
+    }
+
+    if (isAdmin) {
+      ensureDefaultStore().catch((error) => setStoreError(`No se pudo preparar la tienda principal: ${error.message}`));
+    }
+
+    const unsubscribe = subscribeToStores(
+      (nextStores) => setStores(nextStores),
+      (error) => setStoreError(`No se pudieron cargar las tiendas: ${error.message}`),
+    );
+    return () => unsubscribe();
+  }, [currentUser, currentUserId, currentUser?.status, isAdmin, isStoreManager]);
 
   useEffect(() => {
     if (!canAccessUsers) {
@@ -200,7 +241,7 @@ export default function App() {
   }, [usersList]);
 
   const tabPermissions = {
-    pos: canAccessPos,
+    pos: canUsePos,
     inventory: canAccessInventory,
     sales: canAccessSales,
     users: canAccessUsers,
@@ -290,7 +331,13 @@ export default function App() {
     };
   }, [visibleSalesToday]);
 
-  const inventoryAuditPreview = useMemo(() => products.reduce((summary, product) => {
+  const inventoryProductsForEdit = useMemo(() => (
+    isGeneralView
+      ? products.filter((product) => product.storeId === inventoryTargetStoreId)
+      : products
+  ), [isGeneralView, inventoryTargetStoreId, products]);
+
+  const inventoryAuditPreview = useMemo(() => inventoryProductsForEdit.reduce((summary, product) => {
     const rawCount = inventoryAuditCounts[product.id];
     if (rawCount === undefined || rawCount.trim() === '') return summary;
 
@@ -317,7 +364,7 @@ export default function App() {
     surplusUnits: 0,
     surplusValue: 0,
     adjustedProducts: 0,
-  }), [products, inventoryAuditCounts]);
+  }), [inventoryProductsForEdit, inventoryAuditCounts]);
 
   const lowStockProducts = useMemo(() => {
     return products.filter((product) => product.currentStock <= product.minStock);
@@ -349,6 +396,22 @@ export default function App() {
     return Array.from(cats);
   }, [products]);
 
+  const storeNameById = useMemo(
+    () => new Map(stores.map((store) => [store.id, store.name])),
+    [stores],
+  );
+
+  const inventoryTableProducts = useMemo(() => {
+    if (!isGeneralView) return products;
+
+    return [...products].sort((first, second) => {
+      const firstStoreName = storeNameById.get(first.storeId) || 'Sin tienda';
+      const secondStoreName = storeNameById.get(second.storeId) || 'Sin tienda';
+      return firstStoreName.localeCompare(secondStoreName, 'es')
+        || first.name.localeCompare(second.name, 'es');
+    });
+  }, [isGeneralView, products, storeNameById]);
+
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -358,6 +421,7 @@ export default function App() {
   }, [products, searchTerm, selectedCategory]);
 
   const handleSelectProductToCart = (product) => {
+    if (isGeneralView) return;
     const existingItem = cart.find((item) => item.id === product.id);
     const nextQuantity = Number(((existingItem?.qty || 0) + 1).toFixed(2));
 
@@ -430,11 +494,11 @@ export default function App() {
   }, [cart]);
 
   const handleCompleteSale = async () => {
-    if (cart.length === 0 || isSavingSale) return;
+    if (isGeneralView || cart.length === 0 || isSavingSale) return;
     setActionError('');
     setIsSavingSale(true);
     try {
-      const sale = await createSale({ cart, channel: selectedChannel, user: currentUser });
+      const sale = await createSale({ cart, channel: selectedChannel, user: currentUser, storeId: activeStoreId });
       setCart([]);
       setCartQuantityDrafts({});
       setLastCompletedSale(sale);
@@ -449,23 +513,59 @@ export default function App() {
 
   const handleOpenRestock = (product) => {
     setRestockProduct(product);
+    setRestockStoreId(isGeneralView ? product.storeId || '' : activeStoreId);
     setRestockAmount('');
+    setRestockError('');
+    setCanCreateMissingRestockProduct(false);
     setIsRestockOpen(true);
+  };
+
+  const handleDeleteProduct = async (product) => {
+    if (!isAdmin || Number(product.currentStock) !== 0 || deletingProductId) return;
+    if (!window.confirm(`¿Eliminar el producto "${product.name}" de esta tienda?`)) return;
+
+    setActionError('');
+    setDeletingProductId(product.id);
+    try {
+      await removeProduct(product.id, currentUser, product.storeId || activeStoreId);
+      setAddProductSuccess(`Producto "${product.name}" eliminado correctamente.`);
+      setTimeout(() => setAddProductSuccess(''), 4000);
+    } catch (error) {
+      setActionError(error.message || 'No se pudo eliminar el producto.');
+    } finally {
+      setDeletingProductId(null);
+    }
   };
 
   const handleOpenInventoryAudit = () => {
     if (!isAdmin) return;
-    setInventoryAuditType('weekly');
-    setInventoryAuditCounts(Object.fromEntries(products.map((product) => [product.id, ''])));
+    const productsToAudit = isGeneralView
+      ? products.filter((product) => product.storeId === inventoryTargetStoreId)
+      : products;
+    setInventoryAuditCounts(Object.fromEntries(productsToAudit.map((product) => [product.id, ''])));
     setInventoryAuditError('');
     setInventoryAuditResult(null);
     setIsInventoryAuditOpen(true);
   };
 
+  const handleInventoryAuditStoreChange = (storeId) => {
+    setInventoryTargetStoreId(storeId);
+    setInventoryAuditCounts(Object.fromEntries(
+      products
+        .filter((product) => product.storeId === storeId)
+        .map((product) => [product.id, '']),
+    ));
+    setInventoryAuditError('');
+  };
+
   const handleCompleteInventoryAudit = async (event) => {
     event.preventDefault();
     if (!isAdmin || isSavingInventoryAudit) return;
-    if (inventoryAuditPreview.countedProducts !== products.length || products.length === 0) {
+    if (isGeneralView && !inventoryTargetStoreId) {
+      setInventoryAuditError('Selecciona la tienda que deseas auditar.');
+      return;
+    }
+    if (inventoryAuditPreview.countedProducts !== inventoryProductsForEdit.length || inventoryProductsForEdit.length === 0) {
       setInventoryAuditError('Captura un conteo válido para cada producto antes de continuar.');
       return;
     }
@@ -474,12 +574,12 @@ export default function App() {
     setIsSavingInventoryAudit(true);
     try {
       const result = await saveInventoryAudit({
-        auditType: inventoryAuditType,
-        counts: products.map((product) => ({
+        counts: inventoryProductsForEdit.map((product) => ({
           productId: product.id,
           countedStock: Number(inventoryAuditCounts[product.id]),
         })),
         user: currentUser,
+        storeId: isGeneralView ? inventoryTargetStoreId : activeStoreId,
       });
       setInventoryAuditResult(result);
     } catch (error) {
@@ -491,21 +591,67 @@ export default function App() {
 
   const handleApplyRestock = async (e) => {
     e.preventDefault();
+    const targetStoreId = isGeneralView ? restockStoreId : activeStoreId;
+    const targetProduct = isGeneralView
+      ? products.find((product) => product.name === restockProduct?.name && product.storeId === targetStoreId)
+      : restockProduct;
     const amount = parseFloat(restockAmount);
-    if (isNaN(amount) || amount <= 0 || !restockProduct || isRestocking) {
-      setActionError('Indica una cantidad de resurtido válida.');
+    if (isNaN(amount) || amount <= 0 || !targetProduct || !targetStoreId || isRestocking) {
+      if (isGeneralView && !targetProduct) {
+        setRestockError('El producto no existe en la tienda seleccionada. ¿Deseas crearlo con los mismos datos?');
+        setCanCreateMissingRestockProduct(true);
+        return;
+      }
+      setRestockError('Indica una cantidad de resurtido y una tienda válidas.');
       return;
     }
 
-    setActionError('');
+    setRestockError('');
+    setCanCreateMissingRestockProduct(false);
     setIsRestocking(true);
     try {
-      await saveRestock(restockProduct.id, amount, currentUser);
+      await saveRestock(targetProduct.id, amount, currentUser, targetStoreId);
       setIsRestockOpen(false);
+      setRestockStoreId('');
       setRestockProduct(null);
       setRestockAmount('');
     } catch (error) {
-      setActionError(error.message || 'No se pudo actualizar el inventario.');
+      setRestockError(error.message || 'No se pudo actualizar el inventario.');
+    } finally {
+      setIsRestocking(false);
+    }
+  };
+
+  const handleCreateMissingRestockProduct = async () => {
+    const amount = parseFloat(restockAmount);
+    const targetStoreId = isGeneralView ? restockStoreId : activeStoreId;
+    if (!restockProduct || !targetStoreId || !Number.isFinite(amount) || amount <= 0 || isRestocking) {
+      setRestockError('Indica una cantidad de resurtido y una tienda válidas.');
+      return;
+    }
+
+    setRestockError('');
+    setIsRestocking(true);
+    try {
+      await saveNewProduct({
+        name: restockProduct.name,
+        category: restockProduct.category,
+        currentStock: amount,
+        minStock: restockProduct.minStock,
+        unit: restockProduct.unit,
+        price: restockProduct.price,
+        cost: restockProduct.cost,
+        color: restockProduct.color,
+      }, currentUser, targetStoreId);
+      setIsRestockOpen(false);
+      setRestockProduct(null);
+      setRestockStoreId('');
+      setRestockAmount('');
+      setCanCreateMissingRestockProduct(false);
+      setAddProductSuccess(`Producto "${restockProduct.name}" creado y resurtido en la tienda seleccionada.`);
+      setTimeout(() => setAddProductSuccess(''), 4000);
+    } catch (error) {
+      setRestockError(error.message || 'No se pudo crear el producto en la tienda seleccionada.');
     } finally {
       setIsRestocking(false);
     }
@@ -515,6 +661,19 @@ export default function App() {
     event.preventDefault();
     const minStock = parseFloat(minStockDraft);
     if (!isAdmin || isSavingMinStock) return;
+    if (isGeneralView && !inventoryTargetStoreId) {
+      setActionError('Selecciona la tienda donde deseas editar el mínimo.');
+      return;
+    }
+    const sourceProduct = products.find((product) => product.id === productId);
+    const targetProduct = isGeneralView
+      ? products.find((product) => product.name === sourceProduct?.name
+        && product.storeId === inventoryTargetStoreId)
+      : sourceProduct;
+    if (!targetProduct) {
+      setActionError('No se encontró el producto en la tienda seleccionada.');
+      return;
+    }
     if (!Number.isFinite(minStock) || minStock < 0
       || Number((minStock * 100).toFixed(0)) / 100 !== minStock) {
       setActionError('Indica un mínimo de alerta válido con máximo dos decimales.');
@@ -524,7 +683,12 @@ export default function App() {
     setActionError('');
     setIsSavingMinStock(true);
     try {
-      await saveMinStock(productId, minStock, currentUser);
+      await saveMinStock(
+        targetProduct.id,
+        minStock,
+        currentUser,
+        isGeneralView ? inventoryTargetStoreId : activeStoreId,
+      );
       setEditingMinStockProductId(null);
       setMinStockDraft('');
     } catch (error) {
@@ -573,14 +737,26 @@ export default function App() {
   const handleCreateProduct = async (e) => {
     e.preventDefault();
     if (isAddingProduct) return;
+    if (isGeneralView && !inventoryTargetStoreId) {
+      setProductFormError('Selecciona la tienda del nuevo producto.');
+      return;
+    }
 
     const trimmedName = newProductForm.name.trim();
+    const targetStoreId = isGeneralView ? inventoryTargetStoreId : activeStoreId;
     const finalCategory = newProductForm.category === '__custom__'
       ? newProductForm.customCategory.trim()
       : newProductForm.category.trim();
 
     if (!trimmedName) {
       setProductFormError('Ingresa el nombre del producto.');
+      return;
+    }
+    if (products.some((product) => (
+      product.storeId === targetStoreId
+      && product.name.trim().toLocaleLowerCase('es-MX') === trimmedName.toLocaleLowerCase('es-MX')
+    ))) {
+      setProductFormError(`Ya existe un producto llamado "${trimmedName}" en esta tienda.`);
       return;
     }
 
@@ -626,7 +802,7 @@ export default function App() {
         price: priceNum,
         cost: costNum,
         color: newProductForm.color || 'bg-cyan-500',
-      }, currentUser);
+      }, currentUser, targetStoreId);
 
       setIsAddProductOpen(false);
       setAddProductSuccess(`¡Producto "${trimmedName}" registrado con éxito!`);
@@ -677,6 +853,33 @@ export default function App() {
     }
   };
 
+  const handleSaveStore = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || isGeneralView || isSavingStore) return;
+    setStoreError('');
+    setIsSavingStore(true);
+    try {
+      await saveStore(newStoreName);
+      setNewStoreName('');
+    } catch (error) {
+      setStoreError(error.message || 'No se pudo crear la tienda.');
+    } finally {
+      setIsSavingStore(false);
+    }
+  };
+
+  const handleStoreChange = (storeId) => {
+    setCart([]);
+    setCartQuantityDrafts({});
+    setIsRestockOpen(false);
+    setIsAddProductOpen(false);
+    setIsInventoryAuditOpen(false);
+    setEditingMinStockProductId(null);
+    setInventoryTargetStoreId(storeId || '');
+    setActionError('');
+    setSelectedStoreId(storeId || null);
+  };
+
   const handleOpenAddUser = () => {
     setEditingUser(null);
     setUserForm(INITIAL_USER_FORM);
@@ -696,6 +899,7 @@ export default function App() {
       role: userToEdit.role || 'cajero',
       permissions: userToEdit.permissions || DEFAULT_PERMISSIONS[userToEdit.role] || DEFAULT_PERMISSIONS.cajero,
       status: userToEdit.status || 'active',
+      storeId: userToEdit.storeId || '',
     });
     setUserFormError('');
     setIsUserModalOpen(true);
@@ -713,6 +917,7 @@ export default function App() {
     setUserForm(prev => ({
       ...prev,
       role: newRole,
+      storeId: newRole === 'cajero' ? prev.storeId : '',
       permissions: newRole === 'custom' ? prev.permissions : defaultPerms,
     }));
   };
@@ -730,7 +935,7 @@ export default function App() {
 
   const handleSaveUser = async (e) => {
     e.preventDefault();
-    if (isSavingUser) return;
+    if (isGeneralView || isSavingUser) return;
 
     if (userForm.authType === 'credentials') {
       const cleanUsername = userForm.username.toLowerCase().trim();
@@ -752,6 +957,10 @@ export default function App() {
         setUserFormError('Ingresa un correo electrónico válido.');
         return;
       }
+    }
+    if (userForm.role === 'cajero' && !userForm.storeId) {
+      setUserFormError('Asigna una tienda al cajero.');
+      return;
     }
 
     setIsSavingUser(true);
@@ -779,6 +988,7 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userToDelete) => {
+    if (isGeneralView) return;
     if (userToDelete.email?.toLowerCase() === SUPER_ADMIN_EMAIL) {
       alert('No es posible eliminar al Administrador Principal (agrazmario@gmail.com).');
       return;
@@ -976,11 +1186,46 @@ export default function App() {
     );
   }
 
+  if (!activeStoreId && !isStoreManager) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
+        <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="text-center">
+            <div className="inline-flex p-3 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-2xl">
+              <Store className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-bold text-white mt-3">
+              Tienda no asignada
+            </h2>
+            <p className="text-xs text-slate-400 mt-2">
+              Solicita al administrador que configure tu tienda desde el menú Usuarios.
+            </p>
+          </div>
+
+          {storeError && (
+            <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs">
+              {storeError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-2xl text-xs transition border border-slate-700 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            Cerrar Sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       
       {/* Top Navbar */}
-      <header className="relative bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
+      <header className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
         <div className="flex items-center space-x-3">
           <div className="bg-linear-to-r from-cyan-500 to-blue-600 p-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
             <Droplet className="w-6 h-6 text-white" />
@@ -1004,6 +1249,25 @@ export default function App() {
             <AlertTriangle className="w-4 h-4" />
             <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
           </div>
+
+          {isStoreManager && (
+            <label className="flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl text-xs">
+              <Store className="w-4 h-4 text-cyan-400" />
+              <select
+                aria-label="Tienda activa"
+                value={selectedStoreId || ''}
+                onChange={(event) => handleStoreChange(event.target.value)}
+                className="max-w-40 bg-transparent text-slate-200 font-semibold focus:outline-none"
+              >
+                <option value="" className="bg-slate-800">General</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id} className="bg-slate-800">
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {canAccessInventory && lowStockCount > 0 && (
             <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-200">
@@ -1065,7 +1329,7 @@ export default function App() {
 
         {/* View Switcher Tabs */}
         <nav className="flex w-full bg-slate-900 p-1 rounded-xl border border-slate-700/80">
-          {canAccessPos && (
+          {canUsePos && (
             <button
               type="button"
               onClick={() => setActiveTab('pos')}
@@ -1152,8 +1416,15 @@ export default function App() {
       )}
 
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
+        {isGeneralView && (
+          <div className="mb-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs text-cyan-200">
+            <strong>Vista General:</strong> estás consultando inventario y transacciones de todas las tiendas.
+            Punto de Venta no está disponible; para resurtir, selecciona la tienda destino en el formulario.
+          </div>
+        )}
+
         {/* TAB 1: PUNTO DE VENTA (POS) */}
-        {visibleTab === 'pos' && canAccessPos && (
+        {visibleTab === 'pos' && canUsePos && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
             
             {/* Catalog & Quick Add (Left Column - 7/12) */}
@@ -1193,23 +1464,29 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
                 {filteredProducts.map(prod => {
                   const isLow = prod.currentStock <= prod.minStock;
+                  const isOutOfStock = Number(prod.currentStock) === 0;
                   const isSelected = cart.some((item) => item.id === prod.id);
 
                   return (
                     <button
                       key={prod.id}
+                      disabled={isGeneralView || isOutOfStock}
                       onClick={() => handleSelectProductToCart(prod)}
                       className={`text-left p-3.5 rounded-2xl border transition-all flex flex-col justify-between relative group ${
                         isSelected 
                           ? 'bg-slate-800 border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg' 
-                          : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-500 hover:bg-slate-800'
+                          : isOutOfStock
+                            ? 'bg-slate-800/50 border-slate-700/80 opacity-60 cursor-not-allowed'
+                            : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-500 hover:bg-slate-800'
                       }`}
                     >
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <span className={`w-3 h-3 rounded-full ${prod.color}`} />
                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
-                            isLow 
+                            isOutOfStock
+                              ? 'bg-red-500/20 border-red-500/30 text-red-300'
+                              : isLow
                               ? 'bg-amber-500/20 border-amber-500/30 text-amber-300' 
                               : 'bg-slate-900 border-slate-700 text-slate-300'
                           }`}>
@@ -1349,10 +1626,10 @@ export default function App() {
                   )}
 
                   <button
-                    disabled={cart.length === 0 || isSavingSale || loading}
+                    disabled={isGeneralView || cart.length === 0 || isSavingSale || loading}
                     onClick={handleCompleteSale}
                     className={`w-full py-3 rounded-xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${
-                      cart.length > 0 && !isSavingSale && !loading
+                      !isGeneralView && cart.length > 0 && !isSavingSale && !loading
                         ? 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-cyan-500/25' 
                         : 'bg-slate-700 text-slate-500 cursor-not-allowed'
                     }`}
@@ -1499,11 +1776,14 @@ export default function App() {
                         </td>
                       </tr>
                     ) : (
-                      products.map(p => {
+                      inventoryTableProducts.map((p, index) => {
+                        const previousProduct = inventoryTableProducts[index - 1];
+                        const storeName = storeNameById.get(p.storeId) || 'Sin tienda';
+                        const startsStoreGroup = isGeneralView
+                          && (!previousProduct || previousProduct.storeId !== p.storeId);
+                        const isOutOfStock = Number(p.currentStock) === 0;
                         const isLow = p.currentStock <= p.minStock;
-                        const stockScaleMax = p.minStock > 0
-                          ? p.minStock * 1.5
-                          : Math.max(p.currentStock, 1);
+                        const stockScaleMax = Math.max(p.currentStock, p.minStock, 1);
                         const stockFillPercent = Math.min((p.currentStock / stockScaleMax) * 100, 100);
                         const stockBarColor = isLow
                           ? 'bg-red-400'
@@ -1511,7 +1791,16 @@ export default function App() {
                             ? 'bg-amber-400'
                             : 'bg-emerald-400';
                         return (
-                          <tr key={p.id} className="hover:bg-slate-700/30 transition">
+                          <React.Fragment key={p.id}>
+                            {startsStoreGroup && (
+                              <tr className="bg-cyan-500/10 border-y border-cyan-500/20">
+                                <td colSpan={7} className="px-4 py-2 text-xs font-bold text-cyan-300">
+                                  <Store className="inline-block w-4 h-4 mr-1.5 -mt-0.5" />
+                                  {storeName}
+                                </td>
+                              </tr>
+                            )}
+                          <tr className="hover:bg-slate-700/30 transition">
                             <td className="px-4 py-3 font-semibold text-slate-100 flex items-center gap-2">
                               <span className={`w-2.5 h-2.5 rounded-full ${p.color}`} />
                               {p.name}
@@ -1520,7 +1809,9 @@ export default function App() {
                             <td className="px-4 py-3 font-mono font-bold">
                               <div className="flex flex-col items-start gap-1.5">
                                 <span className={`px-2 py-0.5 rounded-md border ${
-                                  isLow 
+                                  isOutOfStock
+                                    ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                                    : isLow
                                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse' 
                                     : 'bg-slate-900 text-slate-200 border-slate-700'
                                 }`}>
@@ -1606,15 +1897,30 @@ export default function App() {
                             <td className="px-4 py-3 font-mono">${p.cost.toFixed(2)}</td>
                             <td className="px-4 py-3 font-mono text-cyan-400 font-bold">${p.price.toFixed(2)}</td>
                             <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleOpenRestock(p)}
-                                className="bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 ml-auto border border-slate-600 cursor-pointer"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                Resurtir
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleOpenRestock(p)}
+                                  className="bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  Resurtir
+                                </button>
+                                {isAdmin && Number(p.currentStock) === 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteProduct(p)}
+                                    disabled={deletingProductId === p.id}
+                                    aria-label={`Eliminar ${p.name}`}
+                                    title="Eliminar producto sin existencias"
+                                    className="text-slate-400 hover:text-red-400 disabled:opacity-50 p-1.5 rounded-lg hover:bg-red-500/10 transition"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -1664,7 +1970,7 @@ export default function App() {
                       <p className="text-sm text-slate-400 text-center py-10">No hay movimientos de este tipo.</p>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[650px] text-left text-xs text-slate-300">
+                        <table className="w-full min-w-162.5 text-left text-xs text-slate-300">
                           <thead className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
                             <tr>
                               <th className="px-3 py-3">Fecha</th>
@@ -1681,7 +1987,7 @@ export default function App() {
                                 : movement.type === 'sale'
                                   ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
                                   : movement.type === 'audit'
-                                    ? `Auditoría ${movement.auditType === 'monthly' ? 'mensual' : 'semanal'}`
+                                    ? 'Auditoría'
                                     : 'Producto creado';
                               const quantity = Math.abs(movement.amount || 0);
                               return (
@@ -1720,9 +2026,7 @@ export default function App() {
                   <div className="flex shrink-0 items-center justify-between border-b border-slate-700 p-5">
                     <h3 className="flex items-center gap-2 text-base font-bold text-white">
                       <ClipboardCheck className="h-5 w-5 text-amber-400" />
-                      {inventoryAuditResult
-                        ? `Auditoría ${inventoryAuditResult.auditType === 'weekly' ? 'semanal' : 'mensual'} completada`
-                        : 'Auditoría de inventario'}
+                      {inventoryAuditResult ? 'Auditoría completada' : 'Auditoría de inventario'}
                     </h3>
                     <button
                       type="button"
@@ -1759,7 +2063,7 @@ export default function App() {
                       </div>
 
                       <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-700">
-                        <table className="w-full min-w-[680px] text-left text-xs text-slate-300">
+                        <table className="w-full min-w-170 text-left text-xs text-slate-300">
                           <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
                             <tr>
                               <th className="px-3 py-3">Producto</th>
@@ -1803,24 +2107,24 @@ export default function App() {
                   ) : (
                     <form onSubmit={handleCompleteInventoryAudit} className="flex min-h-0 flex-1 flex-col">
                       <div className="space-y-4 overflow-y-auto p-5">
-                        <div>
-                          <p className="mb-2 text-xs font-medium text-slate-300">Frecuencia del inventario</p>
-                          <div className="flex w-fit rounded-lg border border-slate-700 bg-slate-900 p-1">
-                            {[
-                              { value: 'weekly', label: 'Semanal' },
-                              { value: 'monthly', label: 'Mensual' },
-                            ].map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                onClick={() => setInventoryAuditType(option.value)}
-                                className={`rounded-md px-4 py-2 text-xs font-semibold transition ${inventoryAuditType === option.value ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
+                        {isGeneralView && (
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-300">
+                              Tienda a auditar: <span className="text-cyan-400">*</span>
+                            </label>
+                            <select
+                              required
+                              value={inventoryTargetStoreId}
+                              onChange={(event) => handleInventoryAuditStoreChange(event.target.value)}
+                              className="w-full max-w-sm rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none"
+                            >
+                              <option value="">Selecciona una tienda</option>
+                              {stores.map((store) => (
+                                <option key={store.id} value={store.id}>{store.name}</option>
+                              ))}
+                            </select>
                           </div>
-                        </div>
+                        )}
 
                         <p className="text-xs text-slate-400">
                           Compara cada conteo físico con el stock esperado. Al guardar, las diferencias corregirán las existencias.
@@ -1829,7 +2133,7 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                           <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                             <p className="text-[11px] text-slate-400">Productos contados</p>
-                            <p className="mt-1 font-mono font-bold text-white">{inventoryAuditPreview.countedProducts} / {products.length}</p>
+                            <p className="mt-1 font-mono font-bold text-white">{inventoryAuditPreview.countedProducts} / {inventoryProductsForEdit.length}</p>
                           </div>
                           <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                             <p className="text-[11px] text-slate-400">Faltante</p>
@@ -1843,16 +2147,16 @@ export default function App() {
                           </div>
                         </div>
 
-                        {products.length > 250 && (
+                        {inventoryProductsForEdit.length > 250 && (
                           <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
                             Esta auditoría admite hasta 250 productos por transacción.
                           </p>
                         )}
-                        {products.length === 0 ? (
+                        {inventoryProductsForEdit.length === 0 ? (
                           <p className="py-8 text-center text-sm text-slate-400">No hay productos para auditar.</p>
                         ) : (
                           <div className="max-h-[45vh] overflow-auto rounded-xl border border-slate-700">
-                            <table className="w-full min-w-[700px] text-left text-xs text-slate-300">
+                            <table className="w-full min-w-175 text-left text-xs text-slate-300">
                               <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
                                 <tr>
                                   <th className="px-3 py-3">Producto</th>
@@ -1862,7 +2166,7 @@ export default function App() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-700/60">
-                                {products.map((product) => {
+                                {inventoryProductsForEdit.map((product) => {
                                   const rawCount = inventoryAuditCounts[product.id] ?? '';
                                   const countedStock = rawCount === '' ? null : Number(rawCount);
                                   const validCount = Number.isFinite(countedStock)
@@ -1932,7 +2236,7 @@ export default function App() {
                         </button>
                         <button
                           type="submit"
-                          disabled={isSavingInventoryAudit || products.length === 0 || products.length > 250 || inventoryAuditPreview.countedProducts !== products.length}
+                          disabled={isSavingInventoryAudit || inventoryProductsForEdit.length === 0 || inventoryProductsForEdit.length > 250 || inventoryAuditPreview.countedProducts !== inventoryProductsForEdit.length}
                           className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <ClipboardCheck className="h-4 w-4" />
@@ -1964,6 +2268,64 @@ export default function App() {
                   </div>
 
                   <form onSubmit={handleApplyRestock} className="space-y-4">
+                    {isGeneralView && (
+                      <div>
+                        <label className="text-xs text-slate-300 block mb-1">
+                          Tienda a resurtir: <span className="text-cyan-400">*</span>
+                        </label>
+                        <select
+                          required
+                          value={restockStoreId}
+                          onChange={(event) => {
+                            setRestockStoreId(event.target.value);
+                            setRestockError('');
+                            setCanCreateMissingRestockProduct(false);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                        >
+                          <option value="">Selecciona una tienda</option>
+                          {stores.map((store) => (
+                            <option key={store.id} value={store.id}>{store.name}</option>
+                          ))}
+                        </select>
+                        {restockStoreId && (
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Stock en la tienda seleccionada:{' '}
+                            {products.find((product) => product.name === restockProduct.name
+                              && product.storeId === restockStoreId)?.currentStock ?? 'Producto no disponible'}{' '}
+                            {restockProduct.unit}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {restockError && (
+                      <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                        <p>{restockError}</p>
+                        {canCreateMissingRestockProduct && (
+                          <div className="mt-3 flex justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={isRestocking}
+                              onClick={() => {
+                                setRestockError('');
+                                setCanCreateMissingRestockProduct(false);
+                              }}
+                              className="rounded-lg bg-slate-700 px-3 py-1.5 font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                            >
+                              No
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isRestocking}
+                              onClick={handleCreateMissingRestockProduct}
+                              className="rounded-lg bg-cyan-500 px-3 py-1.5 font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+                            >
+                              Sí, crear producto
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs text-slate-300 block mb-1">Cantidad a agregar ({restockProduct.unit}):</label>
                       <input
@@ -2023,6 +2385,26 @@ export default function App() {
                   )}
 
                   <form onSubmit={handleCreateProduct} className="space-y-4">
+                    {isGeneralView && (
+                      <div>
+                        <label className="text-xs text-slate-300 block mb-1 font-medium">
+                          Tienda del producto: <span className="text-cyan-400">*</span>
+                        </label>
+                        <select
+                          required
+                          aria-label="Tienda del nuevo producto"
+                          value={inventoryTargetStoreId}
+                          onChange={(event) => setInventoryTargetStoreId(event.target.value)}
+                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                        >
+                          <option value="">Selecciona una tienda</option>
+                          {stores.map((store) => (
+                            <option key={store.id} value={store.id}>{store.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* Nombre */}
                     <div>
                       <label className="text-xs text-slate-300 block mb-1 font-medium">
@@ -2415,7 +2797,7 @@ export default function App() {
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
                             <User className="w-3 h-3 text-slate-500 shrink-0" />
-                            <span className="text-slate-200 font-medium truncate max-w-[120px]">
+                            <span className="text-slate-200 font-medium truncate max-w-30">
                               {sale.createdBy?.userName || 'Desconocido'}
                             </span>
                           </div>
@@ -2520,6 +2902,47 @@ export default function App() {
               </div>
             </div>
 
+            {isAdmin && !isGeneralView && (
+              <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md space-y-3">
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <Store className="w-5 h-5 text-cyan-400" />
+                    Tiendas
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Administra las tiendas disponibles para supervisores y cajeros.
+                  </p>
+                </div>
+                {storeError && (
+                  <p className="text-xs text-red-300">{storeError}</p>
+                )}
+                <form onSubmit={handleSaveStore} className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={newStoreName}
+                    onChange={(event) => setNewStoreName(event.target.value)}
+                    placeholder="Nombre de la nueva tienda"
+                    className="flex-1 min-w-52 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSavingStore}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition disabled:opacity-50"
+                  >
+                    {isSavingStore ? 'Guardando...' : 'Agregar tienda'}
+                  </button>
+                </form>
+                <div className="flex flex-wrap gap-2">
+                  {stores.map((store) => (
+                    <span key={store.id} className="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-300">
+                      <Store className="w-3.5 h-3.5 text-cyan-400" />
+                      {store.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Users Table */}
             <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
               <div className="p-4 border-b border-slate-700 flex justify-between items-center flex-wrap gap-3">
@@ -2532,14 +2955,16 @@ export default function App() {
                     Permite a los administradores conceder o revocar accesos en tiempo real
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleOpenAddUser}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Nuevo Usuario</span>
-                </button>
+                {!isGeneralView && (
+                  <button
+                    type="button"
+                    onClick={handleOpenAddUser}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Nuevo Usuario</span>
+                  </button>
+                )}
               </div>
 
               {usersLoading && (
@@ -2662,16 +3087,18 @@ export default function App() {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditUser(u)}
-                                  className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
-                                  title="Editar usuario y permisos"
-                                >
-                                  <Edit className="w-3 h-3" />
-                                  <span>Editar</span>
-                                </button>
-                                {!isMainAdmin && (
+                                {!isGeneralView && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditUser(u)}
+                                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
+                                    title="Editar usuario y permisos"
+                                  >
+                                    <Edit className="w-3 h-3" />
+                                    <span>Editar</span>
+                                  </button>
+                                )}
+                                {!isGeneralView && !isMainAdmin && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteUser(u)}
@@ -2892,6 +3319,25 @@ export default function App() {
                   </select>
                 </div>
               </div>
+
+              {userForm.role === 'cajero' && (
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1 font-medium">
+                    Tienda asignada: <span className="text-cyan-400">*</span>
+                  </label>
+                  <select
+                    required
+                    value={userForm.storeId}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, storeId: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                  >
+                    <option value="">Selecciona una tienda</option>
+                    {stores.map((store) => (
+                      <option key={store.id} value={store.id}>{store.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Permisos Granulares */}
               <div>

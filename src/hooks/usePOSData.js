@@ -19,7 +19,7 @@ const formatTimestamp = (timestamp) => {
   };
 };
 
-export function usePOSData() {
+export function usePOSData(storeId, enabled = true) {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
   const [movements, setMovements] = useState([]);
@@ -29,13 +29,15 @@ export function usePOSData() {
   const [errors, setErrors] = useState({ products: null, sales: null, movements: null });
 
   useEffect(() => {
-    if (!db) return undefined;
+    if (!db || !enabled) {
+      return undefined;
+    }
 
     const unsubscribeProducts = onSnapshot(
       collection(db, 'products'),
       (snapshot) => {
         try {
-          const nextProducts = snapshot.docs.map((productDoc) => {
+          const nextProducts = snapshot.docs.filter((productDoc) => !storeId || productDoc.data().storeId === storeId).map((productDoc) => {
             const data = productDoc.data();
             if (typeof data.name !== 'string' || typeof data.category !== 'string'
               || !Number.isFinite(data.currentStock) || !Number.isFinite(data.minStock)
@@ -63,6 +65,7 @@ export function usePOSData() {
       (snapshot) => {
         try {
           const nextSales = snapshot.docs
+            .filter((saleDoc) => !storeId || saleDoc.data().storeId === storeId)
             .map((saleDoc) => {
               const data = saleDoc.data();
               if (!Number.isFinite(data.total) || !Number.isFinite(data.liters) || !Array.isArray(data.items)) {
@@ -95,6 +98,7 @@ export function usePOSData() {
       (snapshot) => {
         try {
           const nextMovements = snapshot.docs
+            .filter((movDoc) => !storeId || movDoc.data().storeId === storeId)
             .map((movDoc) => {
               const data = movDoc.data();
               return {
@@ -123,12 +127,22 @@ export function usePOSData() {
       unsubscribeSales();
       unsubscribeMovements();
     };
-  }, []);
+  }, [enabled, storeId]);
+
+  const visibleProducts = enabled
+    ? (storeId ? products.filter((product) => product.storeId === storeId) : products)
+    : [];
+  const visibleSales = enabled
+    ? (storeId ? sales.filter((sale) => sale.storeId === storeId) : sales)
+    : [];
+  const visibleMovements = enabled
+    ? (storeId ? movements.filter((movement) => movement.storeId === storeId) : movements)
+    : [];
 
   return {
-    products,
-    sales,
-    movements,
+    products: visibleProducts,
+    sales: visibleSales,
+    movements: visibleMovements,
     loading: Boolean(db) && (!productsReady || !salesReady || !movementsReady),
     error: !db
       ? firebaseConfigError

@@ -1,7 +1,47 @@
-import { addDoc, collection, doc, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 
-export async function addProduct(productData, user = null) {
+export async function deleteProduct(productId, user = null, storeId = null) {
+  if (!db) {
+    throw new Error('No se puede eliminar el producto: configura primero Firebase.');
+  }
+  if (user?.role !== 'admin') {
+    throw new Error('Solo un administrador puede eliminar productos.');
+  }
+  if (!productId || typeof storeId !== 'string' || !storeId.trim()) {
+    throw new Error('El producto y la tienda son obligatorios.');
+  }
+
+  const productRef = doc(db, 'products', productId);
+  const productSnapshot = await getDoc(productRef);
+  if (!productSnapshot.exists()) {
+    throw new Error('El producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
+  }
+
+  const product = productSnapshot.data();
+  if (product.storeId !== storeId) {
+    throw new Error('El producto no pertenece a la tienda seleccionada.');
+  }
+  if (Number(product.currentStock) !== 0) {
+    throw new Error('Solo se pueden eliminar productos con stock en 0.');
+  }
+
+  await deleteDoc(productRef);
+}
+
+export async function addProduct(productData, user = null, storeId = null) {
   if (!db) {
     throw new Error('No se puede crear el producto: configura primero Firebase.');
   }
@@ -28,6 +68,9 @@ export async function addProduct(productData, user = null) {
   if (!trimmedName) {
     throw new Error('El nombre del producto es obligatorio.');
   }
+  if (typeof storeId !== 'string' || !storeId.trim()) {
+    throw new Error('Selecciona una tienda válida para el producto.');
+  }
   if (!trimmedCategory) {
     throw new Error('La categoría del producto es obligatoria.');
   }
@@ -42,6 +85,20 @@ export async function addProduct(productData, user = null) {
   }
   if (!Number.isFinite(numCost) || numCost < 0) {
     throw new Error('El costo por unidad debe ser un número mayor o igual a 0.');
+  }
+
+  const normalizedName = trimmedName.toLocaleLowerCase('es-MX');
+  const productsInStore = await getDocs(query(
+    collection(db, 'products'),
+    where('storeId', '==', storeId),
+  ));
+  const duplicateProduct = productsInStore.docs.some((productDoc) => {
+    const existingName = productDoc.data().name;
+    return typeof existingName === 'string'
+      && existingName.trim().toLocaleLowerCase('es-MX') === normalizedName;
+  });
+  if (duplicateProduct) {
+    throw new Error(`Ya existe un producto llamado "${trimmedName}" en esta tienda.`);
   }
 
   const userInfo = {
@@ -61,6 +118,7 @@ export async function addProduct(productData, user = null) {
     cost: Number(numCost.toFixed(2)),
     color: color || 'bg-cyan-500',
     createdBy: userInfo,
+    storeId,
     createdAt: serverTimestamp(),
   };
 
@@ -76,13 +134,14 @@ export async function addProduct(productData, user = null) {
     newStock: Number(numCurrentStock.toFixed(2)),
     referenceId: docRef.id,
     createdBy: userInfo,
+    storeId,
     timestamp: serverTimestamp(),
   });
 
   return { id: docRef.id, ...newProduct };
 }
 
-export async function restockProduct(productId, amount, user = null) {
+export async function restockProduct(productId, amount, user = null, storeId = null) {
   if (!db) {
     throw new Error('No se puede actualizar el inventario: configura primero Firebase.');
   }
@@ -131,12 +190,13 @@ export async function restockProduct(productId, amount, user = null) {
       newStock,
       referenceId: productId,
       createdBy: userInfo,
+      storeId,
       timestamp: serverTimestamp(),
     });
   });
 }
 
-export async function updateProductMinStock(productId, minStock, user = null) {
+export async function updateProductMinStock(productId, minStock, user = null, storeId = null) {
   if (!db) {
     throw new Error('No se puede actualizar el mínimo: configura primero Firebase.');
   }
@@ -149,6 +209,7 @@ export async function updateProductMinStock(productId, minStock, user = null) {
   }
 
   await updateDoc(doc(db, 'products', productId), {
+    storeId,
     minStock: Number(minStock.toFixed(2)),
     minStockUpdatedBy: {
       userId: user.id || user.uid || null,
@@ -160,15 +221,12 @@ export async function updateProductMinStock(productId, minStock, user = null) {
   });
 }
 
-export async function completeInventoryAudit({ auditType, counts, user = null }) {
+export async function completeInventoryAudit({ counts, user = null, storeId = null }) {
   if (!db) {
     throw new Error('No se puede guardar la auditoría: configura primero Firebase.');
   }
   if (user?.role !== 'admin') {
     throw new Error('Solo un administrador puede realizar auditorías de inventario.');
-  }
-  if (!['weekly', 'monthly'].includes(auditType)) {
-    throw new Error('Selecciona una frecuencia de auditoría válida.');
   }
   if (!Array.isArray(counts) || counts.length === 0 || counts.length > 250) {
     throw new Error('La auditoría debe incluir entre 1 y 250 productos.');
@@ -236,7 +294,6 @@ export async function completeInventoryAudit({ auditType, counts, user = null })
       transaction.set(movementRefs[index], {
         type: 'audit',
         auditId,
-        auditType,
         ...line,
         productName: line.productName,
         amount: line.difference,
@@ -244,13 +301,13 @@ export async function completeInventoryAudit({ auditType, counts, user = null })
         newStock: line.countedStock,
         referenceId: auditId,
         createdBy: userInfo,
+        storeId,
         timestamp: serverTimestamp(),
       });
     });
 
     return {
       auditId,
-      auditType,
       auditedProducts: lines.length,
       adjustedProducts: lines.filter((line) => line.difference !== 0).length,
       shortageUnits: Number(lines.reduce((sum, line) => sum + line.shortage, 0).toFixed(2)),
@@ -261,4 +318,3 @@ export async function completeInventoryAudit({ auditType, counts, user = null })
     };
   });
 }
-

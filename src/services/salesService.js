@@ -8,7 +8,7 @@ import { db } from '../firebase';
 
 const roundToCents = (value) => Number(value.toFixed(2));
 
-export async function createSale({ cart, channel, user }) {
+export async function createSale({ cart, channel, user, storeId }) {
   if (!db) {
     throw new Error('No se puede registrar la venta: configura primero Firebase.');
   }
@@ -82,6 +82,7 @@ export async function createSale({ cart, channel, user }) {
       total,
       liters,
       createdBy: userInfo,
+      storeId,
     };
 
     saleItems.forEach((item, index) => {
@@ -100,12 +101,14 @@ export async function createSale({ cart, channel, user }) {
         referenceId: saleRef.id,
         ticketId,
         createdBy: userInfo,
+        storeId,
         timestamp: serverTimestamp(),
       });
     });
 
     transaction.set(saleRef, {
       ...sale,
+      storeId,
       timestamp: serverTimestamp(),
     });
 
