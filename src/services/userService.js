@@ -19,7 +19,7 @@ import { auth, db, googleProvider } from '../firebase';
 
 export const SUPER_ADMIN_EMAIL = 'agrazmario@gmail.com';
 
-const LOCAL_USER_SESSION_KEY = 'posklean_local_user';
+let customSessionProfile = null;
 
 export const DEFAULT_PERMISSIONS = {
   admin: { pos: true, inventory: true, sales: true, users: true },
@@ -94,8 +94,8 @@ export async function loginWithCredentials(usernameOrEmail, password) {
     authProvider: 'credentials',
   };
 
-  localStorage.setItem(LOCAL_USER_SESSION_KEY, JSON.stringify(profile));
-  window.dispatchEvent(new CustomEvent('posklean-auth-change', { detail: profile }));
+  customSessionProfile = profile;
+  window.dispatchEvent(new Event('posklean-auth-change'));
 
   return profile;
 }
@@ -105,24 +105,15 @@ export async function loginWithGoogle() {
     throw new Error('Firebase Auth no está inicializado. Revisa las variables de entorno de Firebase.');
   }
   // Limpiar sesión local previa
-  localStorage.removeItem(LOCAL_USER_SESSION_KEY);
+  customSessionProfile = null;
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function logoutUser() {
-  localStorage.removeItem(LOCAL_USER_SESSION_KEY);
-  window.dispatchEvent(new CustomEvent('posklean-auth-change', { detail: null }));
+  customSessionProfile = null;
+  window.dispatchEvent(new Event('posklean-auth-change'));
   if (auth) {
     await signOut(auth);
-  }
-}
-
-export function getStoredLocalUser() {
-  try {
-    const raw = localStorage.getItem(LOCAL_USER_SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
   }
 }
 
@@ -131,15 +122,13 @@ export function subscribeAuthState(onUserChanged) {
 
   const handleCustomAuth = () => {
     if (isGoogleLoggedIn) return;
-    const localUser = getStoredLocalUser();
-    onUserChanged(localUser);
+    onUserChanged(customSessionProfile);
   };
 
   window.addEventListener('posklean-auth-change', handleCustomAuth);
 
   if (!auth) {
-    const localUser = getStoredLocalUser();
-    onUserChanged(localUser);
+    onUserChanged(customSessionProfile);
     return () => {
       window.removeEventListener('posklean-auth-change', handleCustomAuth);
     };
@@ -178,8 +167,7 @@ export function subscribeAuthState(onUserChanged) {
       }
     } else {
       isGoogleLoggedIn = false;
-      const localUser = getStoredLocalUser();
-      onUserChanged(localUser);
+      onUserChanged(customSessionProfile);
     }
   });
 

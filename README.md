@@ -19,7 +19,7 @@ Aplicación de punto de venta e inventario con React, Vite y Firebase Firestore.
    color: string (clase de color de Tailwind usada por la tarjeta)
    ```
 
-4. Configura reglas de Firestore acordes a la autenticación y los permisos que requiera tu negocio antes de publicar la app. El ejemplo del cliente no incorpora inicio de sesión.
+4. Configura reglas de Firestore acordes a la autenticación y los permisos que requiera tu negocio antes de publicar la app. Las cuentas locales de usuario y contraseña mantienen su perfil de sesión solo en memoria del navegador, por lo que será necesario volver a iniciar sesión después de recargar la página.
 5. Ejecuta `npm install` y luego `npm run dev`.
 
 La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni tickets de ejemplo; al comienzo, las colecciones deben estar cargadas con los datos reales del local.
@@ -30,7 +30,7 @@ La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni t
 
 `src/services/salesService.js` procesa cada cobro en una transacción: lee los productos, verifica que existan y que tengan stock suficiente, calcula el precio desde Firestore, descuenta `currentStock` y crea un ticket en `sales` como una sola operación atómica. Las ventas guardan cantidades y precios de cada artículo junto con el canal, el total y una marca de tiempo del servidor.
 
-Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. Las reglas de Firestore deben controlar quién puede leer y escribir; para cobros privilegiados o permisos finos, mueve la operación a un backend autenticado.
+Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. El inicio de sesión local todavía verifica credenciales en el cliente y no constituye autenticación segura para proteger operaciones en Firestore. Las reglas de Firestore deben controlar quién puede leer y escribir; para cobros privilegiados o permisos finos, mueve la operación a un backend autenticado.
 
 ## Impresión de tickets
 
