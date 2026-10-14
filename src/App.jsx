@@ -103,8 +103,7 @@ export default function App() {
   
   // POS State
   const [cart, setCart] = useState([]);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [quantityInput, setQuantityInput] = useState('1');
+  const [cartQuantityDrafts, setCartQuantityDrafts] = useState({});
   const [selectedChannel, setSelectedChannel] = useState('Mostrador');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
@@ -260,53 +259,67 @@ export default function App() {
   }, [products, searchTerm, selectedCategory]);
 
   const handleSelectProductToCart = (product) => {
-    setSelectedProduct(product);
-    setQuantityInput('1');
+    const existingItem = cart.find((item) => item.id === product.id);
+    const nextQuantity = Number(((existingItem?.qty || 0) + 1).toFixed(2));
+
+    if (nextQuantity > product.currentStock) {
+      alert(`⚠️ Stock insuficiente. Solo quedan ${product.currentStock} ${product.unit} disponibles.`);
+      return;
+    }
+
+    setCart(existingItem
+      ? cart.map((item) => item.id === product.id
+        ? { ...item, qty: nextQuantity, total: Number((nextQuantity * product.price).toFixed(2)) }
+        : item)
+      : [...cart, {
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        unit: product.unit,
+        qty: 1,
+        total: Number(product.price.toFixed(2)),
+      }]);
   };
 
-  const handleAddToCart = () => {
-    if (!selectedProduct) return;
-    const qty = parseFloat(quantityInput);
-    if (isNaN(qty) || qty <= 0 || Number((qty * 100).toFixed(0)) / 100 !== qty) {
-      alert('Ingresa una cantidad válida con máximo dos decimales.');
+  const handleCartQuantityChange = (productId, value) => {
+    setCartQuantityDrafts((previous) => ({ ...previous, [productId]: value }));
+    const quantity = parseFloat(value);
+    const product = products.find((item) => item.id === productId);
+    if (!value || !Number.isFinite(quantity) || quantity <= 0
+      || Number((quantity * 100).toFixed(0)) / 100 !== quantity
+      || !product || quantity > product.currentStock) {
       return;
     }
 
-    if (qty > selectedProduct.currentStock) {
-      alert(`⚠️ Stock insuficiente. Solo quedan ${selectedProduct.currentStock} ${selectedProduct.unit} disponibles.`);
-      return;
-    }
+    setCart((previous) => previous.map((item) => item.id === productId
+      ? { ...item, qty: quantity, total: Number((quantity * item.price).toFixed(2)) }
+      : item));
+  };
 
-    setCart(prevCart => {
-      const existingIndex = prevCart.findIndex(item => item.id === selectedProduct.id);
-      if (existingIndex > -1) {
-        const updated = [...prevCart];
-        const newQty = updated[existingIndex].qty + qty;
-        if (newQty > selectedProduct.currentStock) {
-          alert(`⚠️ Excede el stock disponible (${selectedProduct.currentStock} ${selectedProduct.unit}).`);
-          return prevCart;
-        }
-        updated[existingIndex].qty = Number(newQty.toFixed(2));
-        updated[existingIndex].total = Number((updated[existingIndex].qty * selectedProduct.price).toFixed(2));
-        return updated;
-      } else {
-        return [...prevCart, {
-          id: selectedProduct.id,
-          name: selectedProduct.name,
-          price: selectedProduct.price,
-          unit: selectedProduct.unit,
-          qty: qty,
-          total: Number((qty * selectedProduct.price).toFixed(2))
-        }];
-      }
+  const handleCartQuantityBlur = (productId) => {
+    const quantity = parseFloat(cartQuantityDrafts[productId]);
+    const product = products.find((item) => item.id === productId);
+    if (Number.isFinite(quantity) && quantity > 0
+      && Number((quantity * 100).toFixed(0)) / 100 === quantity
+      && product && quantity <= product.currentStock) {
+      setCart((previous) => previous.map((item) => item.id === productId
+        ? { ...item, qty: quantity, total: Number((quantity * item.price).toFixed(2)) }
+        : item));
+    }
+    setCartQuantityDrafts((previous) => {
+      const next = { ...previous };
+      delete next[productId];
+      return next;
     });
-
-    setSelectedProduct(null);
-    setQuantityInput('1');
   };
 
   const handleRemoveFromCart = (id) => {
     setCart(prev => prev.filter(item => item.id !== id));
+    setCartQuantityDrafts((previous) => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
   };
 
   const cartTotal = useMemo(() => {
@@ -324,6 +337,7 @@ export default function App() {
     try {
       const sale = await createSale({ cart, channel: selectedChannel, user: currentUser });
       setCart([]);
+      setCartQuantityDrafts({});
       setLastCompletedSale(sale);
       setShowCheckoutSuccess(true);
       setTimeout(() => setShowCheckoutSuccess(false), 3000);
@@ -1006,7 +1020,7 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
                 {filteredProducts.map(prod => {
                   const isLow = prod.currentStock <= prod.minStock;
-                  const isSelected = selectedProduct?.id === prod.id;
+                  const isSelected = cart.some((item) => item.id === prod.id);
 
                   return (
                     <button
@@ -1044,69 +1058,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Cart & Quick Calculator Panel (Right Column - 5/12) */}
+            {/* Cart Panel (Right Column - 5/12) */}
             <div className="lg:col-span-5 flex flex-col gap-4">
-              
-              {/* Decimal Calculator Input Panel */}
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-md">
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Droplet className="w-4 h-4 text-cyan-400" />
-                  Calculadora de Despacho
-                </h3>
-
-                {selectedProduct ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center bg-slate-900/90 p-3 rounded-xl border border-slate-700">
-                      <div>
-                        <p className="text-sm font-semibold text-white">{selectedProduct.name}</p>
-                        <p className="text-xs text-slate-400">${selectedProduct.price.toFixed(2)} / {selectedProduct.unit}</p>
-                      </div>
-                      <span className="text-xs bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700 text-cyan-300 font-mono">
-                        Disp: {selectedProduct.currentStock} {selectedProduct.unit}
-                      </span>
-                    </div>
-
-                    {/* Quantity Input with Quick Decimal Buttons */}
-                    <div>
-                      <label className="text-xs text-slate-300 mb-1 block">Cantidad / Litros a despachar:</label>
-                      <div className="flex gap-2 mb-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          value={quantityInput}
-                          onChange={(e) => setQuantityInput(e.target.value)}
-                          className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-lg font-bold text-cyan-400 text-center focus:outline-none focus:border-cyan-400"
-                        />
-                        <button
-                          onClick={handleAddToCart}
-                          className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20 flex items-center gap-1"
-                        >
-                          <PlusCircle className="w-4 h-4" />
-                          Agregar
-                        </button>
-                      </div>
-
-                      {/* Decimal Quick Presets */}
-                      <div className="grid grid-cols-5 gap-1.5">
-                        {['0.5', '1', '1.5', '2', '5'].map(val => (
-                          <button
-                            key={val}
-                            onClick={() => setQuantityInput(val)}
-                            className="bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs py-1.5 rounded-lg transition font-mono font-medium"
-                          >
-                            +{val} L
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-slate-900/50 border border-dashed border-slate-700 p-4 rounded-xl text-center text-slate-400 text-xs">
-                    Selecciona un producto del catálogo para definir la cantidad exacta en litros.
-                  </div>
-                )}
-              </div>
 
               {/* Shopping Cart Summary */}
               <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex-1 flex flex-col justify-between shadow-md">
@@ -1157,25 +1110,37 @@ export default function App() {
                         El carrito está vacío. Haz clic en los productos para comenzar a cobras.
                       </div>
                     ) : (
-                      cart.map(item => (
-                        <div key={item.id} className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
-                          <div className="flex-1 pr-2">
-                            <p className="font-semibold text-slate-200 line-clamp-1">{item.name}</p>
-                            <p className="text-slate-400 text-[11px]">
-                              {item.qty} {item.unit} x ${item.price.toFixed(2)}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-100">${item.total.toFixed(2)}</span>
+                      cart.map(item => {
+                        const productStock = products.find((product) => product.id === item.id)?.currentStock;
+                        return (
+                          <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-200 line-clamp-1">{item.name}</p>
+                              <p className="text-slate-400 text-[11px]">${item.price.toFixed(2)} / {item.unit}</p>
+                            </div>
+                            <input
+                              type="number"
+                              min="0.01"
+                              max={productStock}
+                              step="0.01"
+                              aria-label={`Cantidad de ${item.name}`}
+                              value={cartQuantityDrafts[item.id] ?? item.qty}
+                              onChange={(event) => handleCartQuantityChange(item.id, event.target.value)}
+                              onBlur={() => handleCartQuantityBlur(item.id)}
+                              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-1.5 py-1.5 text-center font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
+                            />
+                            <span className="font-bold text-slate-100 whitespace-nowrap">${item.total.toFixed(2)}</span>
                             <button
+                              type="button"
                               onClick={() => handleRemoveFromCart(item.id)}
+                              aria-label={`Quitar ${item.name}`}
                               className="text-slate-500 hover:text-red-400 p-1 rounded-md transition"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
