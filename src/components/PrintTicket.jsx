@@ -1,3 +1,4 @@
+import { Droplet } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 
 export default function PrintTicket({ ticket, receiptWidth, stores }) {
@@ -13,7 +14,10 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
       className={`print-ticket receipt-${receiptWidth}`}
       aria-label={`Ticket de ${type === 'sale' ? 'venta' : type === 'audit' ? 'auditoría' : 'cierre'} para imprimir`}
     >
-      <h1>POSKlean</h1>
+      <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+        <Droplet size={20} strokeWidth={2.5} aria-hidden="true" />
+        NovaKlean
+      </h1>
 
       {type === 'sale' && (
         <>
@@ -181,6 +185,8 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
 
         </>
       )}
+
+      <p style={{ textAlign: 'center', fontSize: '0.7em' }}>Printed by POSKlean</p>
     </section>
   );
 }
