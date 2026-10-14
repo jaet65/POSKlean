@@ -19,8 +19,16 @@ Aplicación de punto de venta e inventario con React, Vite y Firebase Firestore.
    color: string (clase de color de Tailwind usada por la tarjeta)
    ```
 
-4. Configura reglas de Firestore acordes a la autenticación y los permisos que requiera tu negocio antes de publicar la app. Las cuentas locales de usuario y contraseña mantienen su perfil de sesión solo en memoria del navegador, por lo que será necesario volver a iniciar sesión después de recargar la página.
+4. Habilita **Authentication → Email/Password** y **Google** en la consola de Firebase y publica las reglas con `npx firebase-tools deploy --only firestore:rules` (archivo `firestore.rules`). Las reglas exigen sesión de Firebase y autorizan según el perfil `users/{uid}` (rol, estado y tienda).
 5. Ejecuta `npm install` y luego `npm run dev`.
+
+### Autenticación
+
+- Los usuarios con usuario/contraseña se autentican en Firebase Auth con un correo ficticio `<usuario>@posklean.invalid`; la contraseña nunca se guarda en Firestore. Mínimo 6 caracteres.
+- El perfil de cada cuenta vive en `users/{uid}`. El administrador crea cuentas desde el panel (se usa una instancia secundaria de Firebase para no cerrar su sesión).
+- No es posible cambiar la contraseña de otro usuario desde el cliente. Si se olvida, elimina el perfil y crea un usuario nuevo (el mismo nombre solo se puede reutilizar con la contraseña anterior).
+- Las cuentas de Google no se pre-registran: inician sesión, quedan **Pendientes** y un administrador las aprueba. El administrador principal se identifica por su cuenta de Google verificada.
+- Usuarios creados antes de esta migración (con hash local) no pueden iniciar sesión; vuelve a crearlos con el mismo nombre de usuario para reemplazarlos.
 
 La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni tickets de ejemplo; al comienzo, las colecciones deben estar cargadas con los datos reales del local.
 
@@ -30,7 +38,7 @@ La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni t
 
 `src/services/salesService.js` procesa cada cobro en una transacción: lee los productos, verifica que existan y que tengan stock suficiente, calcula el precio desde Firestore, descuenta `currentStock` y crea un ticket en `sales` como una sola operación atómica. Las ventas guardan cantidades y precios de cada artículo junto con el canal, el total y una marca de tiempo del servidor.
 
-Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. El inicio de sesión local todavía verifica credenciales en el cliente y no constituye autenticación segura para proteger operaciones en Firestore. Las reglas de Firestore deben controlar quién puede leer y escribir; para cobros privilegiados o permisos finos, mueve la operación a un backend autenticado.
+Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. Las reglas de Firestore limitan cada cajero a su tienda e impiden modificar o borrar ventas y movimientos, pero no pueden verificar por completo cifras como stock o totales enviadas por un cliente alterado; para eso se requiere un backend autenticado.
 
 ## Impresión de tickets
 

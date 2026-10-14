@@ -30,3 +30,12 @@ export const db = app ? getFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
 export const googleProvider = new GoogleAuthProvider();
 
+const SECONDARY_APP_NAME = 'posklean-user-provisioning';
+
+// Instancia aparte para crear cuentas sin reemplazar la sesión del administrador.
+export function getProvisioningAuth() {
+  if (!app) return null;
+  const existing = getApps().find((candidate) => candidate.name === SECONDARY_APP_NAME);
+  return getAuth(existing || initializeApp(firebaseConfig, SECONDARY_APP_NAME));
+}
+

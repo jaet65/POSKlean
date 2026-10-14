@@ -41,6 +41,7 @@ import {
 import { createSale } from './services/salesService';
 import {
   DEFAULT_PERMISSIONS,
+  MIN_PASSWORD_LENGTH,
   SUPER_ADMIN_EMAIL,
   addUser as saveUser,
   deleteUser as removeUser,
@@ -63,7 +64,6 @@ const INITIAL_USER_FORM = {
   authType: 'credentials', // 'credentials' | 'google'
   username: '',
   password: '',
-  newPassword: '',
   email: '',
   displayName: '',
   role: 'cajero',
@@ -905,8 +905,7 @@ export default function App() {
     setIsLoggingIn(true);
     setAuthError('');
     try {
-      const user = await loginWithCredentials(loginUsername, loginPassword);
-      setCurrentUser(user);
+      await loginWithCredentials(loginUsername, loginPassword);
     } catch (err) {
       setAuthError(err.message || 'Error al iniciar sesión.');
     } finally {
@@ -1019,7 +1018,6 @@ export default function App() {
       authType: userToEdit.authType || (userToEdit.passwordHash ? 'credentials' : 'google'),
       username: userToEdit.username || '',
       password: '',
-      newPassword: '',
       email: userToEdit.email || '',
       displayName: userToEdit.displayName || '',
       role: userToEdit.role || 'cajero',
@@ -1071,12 +1069,8 @@ export default function App() {
         setUserFormError('Ingresa un nombre de usuario válido.');
         return;
       }
-      if (!editingUser && (!userForm.password || userForm.password.trim().length < 4)) {
-        setUserFormError('La contraseña inicial debe tener al menos 4 caracteres.');
-        return;
-      }
-      if (editingUser && userForm.newPassword && userForm.newPassword.trim().length < 4) {
-        setUserFormError('La nueva contraseña debe tener al menos 4 caracteres.');
+      if (!editingUser && (!userForm.password || userForm.password.length < MIN_PASSWORD_LENGTH)) {
+        setUserFormError(`La contraseña inicial debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
         return;
       }
     } else {
@@ -3573,7 +3567,8 @@ export default function App() {
             )}
 
             <form onSubmit={handleSaveUser} className="space-y-4">
-              {/* Selector de Tipo de Cuenta */}
+              {/* Selector de Tipo de Cuenta: solo al editar; las cuentas nuevas son usuario/contraseña */}
+              {editingUser && (
               <div>
                 <label className="text-xs text-slate-300 block mb-1 font-medium">
                   Tipo de Acceso / Autenticación:
@@ -3581,12 +3576,11 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                    onClick={() => setUserForm(prev => ({ ...prev, authType: 'credentials' }))}
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                    disabled
+                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
                       userForm.authType === 'credentials'
                         ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
-                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                        : 'bg-slate-900 border-slate-700 text-slate-400'
                     }`}
                   >
                     <User className="w-3.5 h-3.5" />
@@ -3594,12 +3588,11 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                    onClick={() => setUserForm(prev => ({ ...prev, authType: 'google' }))}
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                    disabled
+                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
                       userForm.authType === 'google'
                         ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
-                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                        : 'bg-slate-900 border-slate-700 text-slate-400'
                     }`}
                   >
                     <Lock className="w-3.5 h-3.5" />
@@ -3607,6 +3600,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
+              )}
 
               {userForm.authType === 'credentials' ? (
                 <div>
@@ -3621,11 +3615,17 @@ export default function App() {
                       type="text"
                       placeholder="Ej. cajero1"
                       required
+                      disabled={Boolean(editingUser)}
                       value={userForm.username}
                       onChange={(e) => setUserForm(prev => ({ ...prev, username: e.target.value.toLowerCase() }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
                     />
                   </div>
+                  {editingUser && (
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      El nombre de usuario no puede cambiarse una vez creado.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div>
@@ -3636,8 +3636,7 @@ export default function App() {
                     type="email"
                     placeholder="ejemplo@gmail.com"
                     required
-                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                    value={userForm.email}
+                    disabled={Boolean(editingUser)}
                     onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
                   />
@@ -3660,8 +3659,10 @@ export default function App() {
                     </span>
                     <input
                       type="password"
-                      placeholder="Mínimo 4 caracteres"
+                      placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
                       required
+                      minLength={MIN_PASSWORD_LENGTH}
+                      autoComplete="new-password"
                       value={userForm.password}
                       onChange={(e) => setUserForm(prev => ({ ...prev, password: e.target.value }))}
                       className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
@@ -3669,23 +3670,9 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Nueva Contraseña (Opcional):
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                      <Key className="w-4 h-4" />
-                    </span>
-                    <input
-                      type="password"
-                      placeholder="Dejar en blanco para mantener la actual"
-                      value={userForm.newPassword}
-                      onChange={(e) => setUserForm(prev => ({ ...prev, newPassword: e.target.value }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                    />
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-500">
+                  La contraseña no puede verse ni cambiarse desde este panel. Si se olvida, crea un nuevo usuario.
+                </p>
               )}
 
               {/* Nombre Completo */}

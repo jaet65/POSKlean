@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db, firebaseConfigError } from '../firebase';
 
 const formatTimestamp = (timestamp) => {
@@ -33,8 +33,13 @@ export function usePOSData(storeId, enabled = true) {
       return undefined;
     }
 
+    // Con tienda definida se consulta solo esa tienda (las reglas lo exigen a los cajeros).
+    const scopedCollection = (name) => (storeId
+      ? query(collection(db, name), where('storeId', '==', storeId))
+      : collection(db, name));
+
     const unsubscribeProducts = onSnapshot(
-      collection(db, 'products'),
+      scopedCollection('products'),
       (snapshot) => {
         try {
           const nextProducts = snapshot.docs.filter((productDoc) => !storeId || productDoc.data().storeId === storeId).map((productDoc) => {
@@ -61,7 +66,7 @@ export function usePOSData(storeId, enabled = true) {
     );
 
     const unsubscribeSales = onSnapshot(
-      collection(db, 'sales'),
+      scopedCollection('sales'),
       (snapshot) => {
         try {
           const nextSales = snapshot.docs
@@ -94,7 +99,7 @@ export function usePOSData(storeId, enabled = true) {
     );
 
     const unsubscribeMovements = onSnapshot(
-      collection(db, 'inventoryMovements'),
+      scopedCollection('inventoryMovements'),
       (snapshot) => {
         try {
           const nextMovements = snapshot.docs

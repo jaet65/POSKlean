@@ -2,6 +2,7 @@ import {
   collection, 
   deleteDoc, 
   doc, 
+  getDoc,
   getDocs, 
   onSnapshot, 
   query, 
@@ -11,15 +12,22 @@ import {
   where 
 } from 'firebase/firestore';
 import { 
+  createUserWithEmailAndPassword,
+  deleteUser as deleteAuthUser,
   onAuthStateChanged, 
+  signInWithEmailAndPassword,
   signInWithPopup, 
   signOut 
 } from 'firebase/auth';
-import { auth, db, googleProvider } from '../firebase';
+import { auth, db, getProvisioningAuth, googleProvider } from '../firebase';
 
 export const SUPER_ADMIN_EMAIL = 'agrazmario@gmail.com';
 
-let customSessionProfile = null;
+// Las cuentas usuario/contraseña se autentican en Firebase Auth con un correo ficticio
+// derivado del usuario. El dominio .invalid está reservado y nunca recibe correo.
+export const AUTH_EMAIL_DOMAIN = 'posklean.invalid';
+export const MIN_PASSWORD_LENGTH = 6;
+const USERNAME_PATTERN = /^[a-z0-9._-]{2,30}$/;
 
 export const DEFAULT_PERMISSIONS = {
   admin: { pos: true, inventory: true, sales: true, users: true },
@@ -28,185 +36,140 @@ export const DEFAULT_PERMISSIONS = {
   custom: { pos: true, inventory: false, sales: false, users: false },
 };
 
-// Generar hash SHA-256 seguro usando Web Crypto API estándar del navegador
-export async function hashPassword(password, salt = 'posklean_salt_v1') {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + salt);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+const normalizeUsername = (username) => (username || '').toLowerCase().trim();
+const toAuthEmail = (username) => `${username}@${AUTH_EMAIL_DOMAIN}`;
+const isCredentialsAccount = (firebaseUser) => (firebaseUser.email || '')
+  .toLowerCase()
+  .endsWith(`@${AUTH_EMAIL_DOMAIN}`);
+
+const AUTH_ERROR_MESSAGES = {
+  'auth/invalid-credential': 'Usuario o contraseña incorrectos.',
+  'auth/invalid-login-credentials': 'Usuario o contraseña incorrectos.',
+  'auth/user-not-found': 'Usuario o contraseña incorrectos.',
+  'auth/wrong-password': 'Usuario o contraseña incorrectos.',
+  'auth/invalid-email': 'El nombre de usuario no es válido.',
+  'auth/user-disabled': 'Esta cuenta ha sido desactivada por el administrador.',
+  'auth/too-many-requests': 'Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo.',
+  'auth/network-request-failed': 'No hay conexión con el servidor. Revisa tu internet.',
+};
 
 export async function loginWithCredentials(usernameOrEmail, password) {
-  if (!db) {
-    throw new Error('Firestore no está configurado.');
+  if (!auth) {
+    throw new Error('Firebase Auth no está inicializado. Revisa las variables de entorno de Firebase.');
   }
 
-  const cleanIdentifier = (usernameOrEmail || '').toLowerCase().trim();
-  if (!cleanIdentifier) {
+  const username = normalizeUsername(usernameOrEmail);
+  if (!username) {
     throw new Error('Ingresa tu nombre de usuario.');
+  }
+  if (!USERNAME_PATTERN.test(username)) {
+    throw new Error('Usuario o contraseña incorrectos.');
   }
   if (!password) {
     throw new Error('Ingresa tu contraseña.');
   }
 
-  const usersRef = collection(db, 'users');
-  
-  // Buscar coincidencia por username o por email
-  let q = query(usersRef, where('username', '==', cleanIdentifier));
-  let snapshot = await getDocs(q);
-
-  if (snapshot.empty) {
-    q = query(usersRef, where('email', '==', cleanIdentifier));
-    snapshot = await getDocs(q);
+  try {
+    await signInWithEmailAndPassword(auth, toAuthEmail(username), password);
+  } catch (error) {
+    throw new Error(AUTH_ERROR_MESSAGES[error.code] || 'No se pudo iniciar sesión. Inténtalo de nuevo.');
   }
-
-  if (snapshot.empty) {
-    throw new Error('Usuario no encontrado.');
-  }
-
-  const userDoc = snapshot.docs[0];
-  const userData = userDoc.data();
-
-  if (userData.status === 'inactive') {
-    throw new Error('Esta cuenta ha sido desactivada por el administrador.');
-  }
-
-  if (!userData.passwordHash) {
-    throw new Error('Esta cuenta requiere inicio de sesión con Google.');
-  }
-
-  const expectedHash = await hashPassword(password, userData.salt || 'posklean_salt_v1');
-  if (userData.passwordHash !== expectedHash) {
-    throw new Error('Contraseña incorrecta.');
-  }
-
-  const nowIso = new Date().toISOString();
-  await updateDoc(doc(db, 'users', userDoc.id), {
-    lastLogin: nowIso,
-  });
-
-  const profile = {
-    id: userDoc.id,
-    uid: userDoc.id,
-    ...userData,
-    lastLogin: nowIso,
-    authProvider: 'credentials',
-  };
-
-  customSessionProfile = profile;
-  window.dispatchEvent(new Event('posklean-auth-change'));
-
-  return profile;
 }
 
 export async function loginWithGoogle() {
   if (!auth) {
     throw new Error('Firebase Auth no está inicializado. Revisa las variables de entorno de Firebase.');
   }
-  // Limpiar sesión local previa
-  customSessionProfile = null;
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function logoutUser() {
-  customSessionProfile = null;
-  window.dispatchEvent(new Event('posklean-auth-change'));
   if (auth) {
     await signOut(auth);
   }
 }
 
 export function subscribeAuthState(onUserChanged) {
-  let isGoogleLoggedIn = false;
-
-  const handleCustomAuth = () => {
-    if (isGoogleLoggedIn) return;
-    onUserChanged(customSessionProfile);
-  };
-
-  window.addEventListener('posklean-auth-change', handleCustomAuth);
-
   if (!auth) {
-    onUserChanged(customSessionProfile);
-    return () => {
-      window.removeEventListener('posklean-auth-change', handleCustomAuth);
-    };
+    onUserChanged(null);
+    return () => {};
   }
 
-  const unsubscribeFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
-    if (firebaseUser) {
-      isGoogleLoggedIn = true;
-      try {
-        const profile = await syncUserProfile(firebaseUser);
-        onUserChanged(profile);
-      } catch (err) {
-        console.error('Error sincronizando perfil de usuario:', err);
-        if (firebaseUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL) {
-          onUserChanged({
-            uid: firebaseUser.uid,
-            email: SUPER_ADMIN_EMAIL,
-            displayName: firebaseUser.displayName || 'Mario Agraz',
-            photoURL: firebaseUser.photoURL,
-            role: 'admin',
-            status: 'active',
-            permissions: DEFAULT_PERMISSIONS.admin,
-          });
-        } else {
-          onUserChanged({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-            photoURL: firebaseUser.photoURL,
-            role: 'guest',
-            status: 'error',
-            errorMessage: err.message,
-            permissions: { pos: false, inventory: false, sales: false, users: false },
-          });
-        }
+  return onAuthStateChanged(auth, async (firebaseUser) => {
+    if (!firebaseUser) {
+      onUserChanged(null);
+      return;
+    }
+
+    try {
+      const profile = await syncUserProfile(firebaseUser);
+      onUserChanged(profile);
+    } catch (err) {
+      console.error('Error sincronizando perfil de usuario:', err);
+      if (firebaseUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL && !isCredentialsAccount(firebaseUser)) {
+        onUserChanged({
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          email: SUPER_ADMIN_EMAIL,
+          displayName: firebaseUser.displayName || 'Mario Agraz',
+          photoURL: firebaseUser.photoURL,
+          role: 'admin',
+          status: 'active',
+          permissions: DEFAULT_PERMISSIONS.admin,
+        });
+      } else {
+        onUserChanged({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
+          photoURL: firebaseUser.photoURL,
+          role: 'guest',
+          status: 'error',
+          errorMessage: err.message,
+          permissions: { pos: false, inventory: false, sales: false, users: false },
+        });
       }
-    } else {
-      isGoogleLoggedIn = false;
-      onUserChanged(customSessionProfile);
     }
   });
-
-  return () => {
-    unsubscribeFirebase();
-    window.removeEventListener('posklean-auth-change', handleCustomAuth);
-  };
 }
+
+const touchLastLogin = async (userRef, fields) => {
+  try {
+    await updateDoc(userRef, fields);
+  } catch (error) {
+    console.warn('No se pudo registrar el último acceso:', error);
+  }
+};
 
 export async function syncUserProfile(firebaseUser) {
   if (!db) {
     throw new Error('Firestore no está configurado.');
   }
 
-  const email = (firebaseUser.email || '').toLowerCase().trim();
-  const isSuperAdmin = email === SUPER_ADMIN_EMAIL;
-
-  // Search in 'users' collection by email
-  const usersRef = collection(db, 'users');
-  const q = query(usersRef, where('email', '==', email));
-  const snapshot = await getDocs(q);
-
   const nowIso = new Date().toISOString();
+  const userRef = doc(db, 'users', firebaseUser.uid);
 
-  if (isSuperAdmin) {
-    let docId = firebaseUser.uid;
-    let existingData = {};
-
-    if (!snapshot.empty) {
-      const firstDoc = snapshot.docs[0];
-      docId = firstDoc.id;
-      existingData = firstDoc.data();
+  if (isCredentialsAccount(firebaseUser)) {
+    const snapshot = await getDoc(userRef);
+    if (!snapshot.exists()) {
+      throw new Error('Tu cuenta no tiene un perfil activo. Contacta al administrador.');
     }
+    const data = snapshot.data();
+    if (data.status === 'active') {
+      await touchLastLogin(userRef, { lastLogin: nowIso });
+    }
+    return { id: snapshot.id, ...data, uid: firebaseUser.uid, lastLogin: nowIso, authProvider: 'credentials' };
+  }
 
+  const email = (firebaseUser.email || '').toLowerCase().trim();
+
+  if (email === SUPER_ADMIN_EMAIL) {
     const adminProfile = {
       uid: firebaseUser.uid,
       email: SUPER_ADMIN_EMAIL,
-      displayName: firebaseUser.displayName || existingData.displayName || 'Mario Agraz',
-      photoURL: firebaseUser.photoURL || existingData.photoURL || null,
+      displayName: firebaseUser.displayName || 'Mario Agraz',
+      photoURL: firebaseUser.photoURL || null,
+      authType: 'google',
       role: 'admin',
       status: 'active',
       permissions: DEFAULT_PERMISSIONS.admin,
@@ -214,35 +177,41 @@ export async function syncUserProfile(firebaseUser) {
       updatedAt: nowIso,
     };
 
-    await setDoc(doc(db, 'users', docId), adminProfile, { merge: true });
-    return { id: docId, ...adminProfile };
+    await setDoc(userRef, adminProfile, { merge: true });
+
+    // Perfiles antiguos del administrador (con ID aleatorio) quedan duplicados tras la migración.
+    try {
+      const legacy = await getDocs(query(collection(db, 'users'), where('email', '==', SUPER_ADMIN_EMAIL)));
+      await Promise.all(legacy.docs
+        .filter((legacyDoc) => legacyDoc.id !== firebaseUser.uid)
+        .map((legacyDoc) => deleteDoc(legacyDoc.ref)));
+    } catch (error) {
+      console.warn('No se pudieron limpiar perfiles antiguos del administrador:', error);
+    }
+
+    return { id: firebaseUser.uid, ...adminProfile, authProvider: 'google' };
   }
 
-  if (!snapshot.empty) {
-    const userDoc = snapshot.docs[0];
-    const data = userDoc.data();
-
-    const updatedProfile = {
-      uid: firebaseUser.uid,
-      displayName: data.displayName || firebaseUser.displayName || 'Usuario POS',
-      photoURL: firebaseUser.photoURL || data.photoURL || null,
-      lastLogin: nowIso,
-    };
-
-    await updateDoc(doc(db, 'users', userDoc.id), updatedProfile);
-    return {
-      id: userDoc.id,
-      ...data,
-      ...updatedProfile,
-    };
+  const snapshot = await getDoc(userRef);
+  if (snapshot.exists()) {
+    const data = snapshot.data();
+    const updates = { lastLogin: nowIso };
+    if (firebaseUser.photoURL && firebaseUser.photoURL !== data.photoURL) {
+      updates.photoURL = firebaseUser.photoURL;
+    }
+    if (data.status === 'active') {
+      await touchLastLogin(userRef, updates);
+    }
+    return { id: snapshot.id, ...data, ...updates, uid: firebaseUser.uid, authProvider: 'google' };
   }
 
-  // User is not yet registered by the Admin -> register as pending
+  // Cuenta Google aún no registrada: queda pendiente hasta que un administrador la apruebe.
   const newPendingUser = {
     uid: firebaseUser.uid,
-    email: email,
+    email,
     displayName: firebaseUser.displayName || 'Nuevo Usuario',
     photoURL: firebaseUser.photoURL || null,
+    authType: 'google',
     role: 'cajero',
     status: 'pending',
     permissions: { pos: false, inventory: false, sales: false, users: false },
@@ -250,8 +219,8 @@ export async function syncUserProfile(firebaseUser) {
     lastLogin: nowIso,
   };
 
-  await setDoc(doc(db, 'users', firebaseUser.uid), newPendingUser);
-  return { id: firebaseUser.uid, ...newPendingUser };
+  await setDoc(userRef, newPendingUser);
+  return { id: firebaseUser.uid, ...newPendingUser, authProvider: 'google' };
 }
 
 export function subscribeToUsers(callback, onError) {
@@ -275,6 +244,36 @@ export function subscribeToUsers(callback, onError) {
   );
 }
 
+async function createAuthAccount(authEmail, password) {
+  const provisioningAuth = getProvisioningAuth();
+  if (!provisioningAuth) throw new Error('Firebase Auth no está inicializado.');
+
+  try {
+    let credential;
+    try {
+      credential = await createUserWithEmailAndPassword(provisioningAuth, authEmail, password);
+    } catch (error) {
+      if (error.code !== 'auth/email-already-in-use') throw error;
+      // Cuenta huérfana (perfil eliminado antes): solo se reutiliza si la contraseña coincide.
+      try {
+        credential = await signInWithEmailAndPassword(provisioningAuth, authEmail, password);
+      } catch {
+        throw new Error('Ese nombre de usuario ya se usó antes con otra contraseña. Elige otro nombre de usuario.');
+      }
+    }
+    return { uid: credential.user.uid, authUser: credential.user, provisioningAuth };
+  } catch (error) {
+    await signOut(provisioningAuth).catch(() => {});
+    if (error.code === 'auth/weak-password') {
+      throw new Error(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+    }
+    if (error.code === 'auth/operation-not-allowed') {
+      throw new Error('Habilita el acceso por correo/contraseña en Firebase Authentication.');
+    }
+    throw error.code ? new Error(AUTH_ERROR_MESSAGES[error.code] || error.message) : error;
+  }
+}
+
 export async function addUser({
   username,
   password,
@@ -287,107 +286,85 @@ export async function addUser({
   authType = 'credentials',
 }) {
   if (!db) throw new Error('Firestore no está inicializado.');
-  
-  const cleanUsername = (username || '').toLowerCase().trim();
+  if (authType !== 'credentials') {
+    throw new Error('Los usuarios de Google deben iniciar sesión primero; después aparecerán como Pendientes para aprobarlos.');
+  }
+
+  const cleanUsername = normalizeUsername(username);
   const cleanEmail = (email || '').toLowerCase().trim();
 
-  if (authType === 'credentials') {
-    if (!cleanUsername) throw new Error('El nombre de usuario es obligatorio.');
-    if (!password || password.trim().length < 4) {
-      throw new Error('La contraseña debe tener al menos 4 caracteres.');
-    }
-
-    // Comprobar que no exista el username
-    const qUsername = query(collection(db, 'users'), where('username', '==', cleanUsername));
-    const existUsername = await getDocs(qUsername);
-    if (!existUsername.empty) {
-      throw new Error(`El usuario "${cleanUsername}" ya existe. Elige otro nombre de usuario.`);
-    }
-
-    const salt = Math.random().toString(36).substring(2, 10);
-    const passwordHash = await hashPassword(password.trim(), salt);
-
-    const resolvedRole = role || 'cajero';
-    const resolvedPermissions = permissions || DEFAULT_PERMISSIONS[resolvedRole] || DEFAULT_PERMISSIONS.cajero;
-
-    const newUser = {
-      username: cleanUsername,
-      email: cleanEmail || '',
-      displayName: (displayName || '').trim() || cleanUsername,
-      authType: 'credentials',
-      passwordHash,
-      salt,
-      role: resolvedRole,
-      permissions: resolvedPermissions,
-      status: status || 'active',
-      storeId: resolvedRole === 'cajero' ? storeId || '' : '',
-      createdAt: new Date().toISOString(),
-    };
-
-    const userDocRef = doc(collection(db, 'users'));
-    await setDoc(userDocRef, newUser);
-    return { id: userDocRef.id, ...newUser };
-  } else {
-    // Modo Google
-    if (!cleanEmail) throw new Error('El correo electrónico es obligatorio para cuentas de Google.');
-
-    const q = query(collection(db, 'users'), where('email', '==', cleanEmail));
-    const existing = await getDocs(q);
-    if (!existing.empty) {
-      throw new Error(`Ya existe un usuario registrado con el correo ${cleanEmail}.`);
-    }
-
-    const resolvedRole = role || 'cajero';
-    const resolvedPermissions = permissions || DEFAULT_PERMISSIONS[resolvedRole] || DEFAULT_PERMISSIONS.cajero;
-
-    const newUser = {
-      email: cleanEmail,
-      username: cleanUsername || '',
-      displayName: (displayName || '').trim() || cleanEmail.split('@')[0],
-      authType: 'google',
-      role: cleanEmail === SUPER_ADMIN_EMAIL ? 'admin' : resolvedRole,
-      permissions: cleanEmail === SUPER_ADMIN_EMAIL ? DEFAULT_PERMISSIONS.admin : resolvedPermissions,
-      status: status || 'active',
-      storeId: resolvedRole === 'cajero' ? storeId || '' : '',
-      createdAt: new Date().toISOString(),
-    };
-
-    const userDocRef = doc(collection(db, 'users'));
-    await setDoc(userDocRef, newUser);
-    return { id: userDocRef.id, ...newUser };
+  if (!USERNAME_PATTERN.test(cleanUsername)) {
+    throw new Error('El usuario debe tener de 2 a 30 caracteres: letras minúsculas, números, punto, guion o guion bajo.');
   }
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+  }
+
+  const existingUsername = await getDocs(
+    query(collection(db, 'users'), where('username', '==', cleanUsername)),
+  );
+  // Los perfiles previos a la migración (con hash local) se reemplazan por la cuenta nueva.
+  const legacyDocs = existingUsername.docs.filter((userDoc) => userDoc.data().passwordHash);
+  if (existingUsername.docs.some((userDoc) => !userDoc.data().passwordHash)) {
+    throw new Error(`El usuario "${cleanUsername}" ya existe. Elige otro nombre de usuario.`);
+  }
+
+  const { uid, authUser, provisioningAuth } = await createAuthAccount(toAuthEmail(cleanUsername), password);
+
+  const resolvedRole = role || 'cajero';
+  const newUser = {
+    uid,
+    username: cleanUsername,
+    email: cleanEmail,
+    displayName: (displayName || '').trim() || cleanUsername,
+    authType: 'credentials',
+    role: resolvedRole,
+    permissions: permissions || DEFAULT_PERMISSIONS[resolvedRole] || DEFAULT_PERMISSIONS.cajero,
+    status: status || 'active',
+    storeId: resolvedRole === 'cajero' ? storeId || '' : '',
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    await setDoc(doc(db, 'users', uid), newUser);
+  } catch (error) {
+    await deleteAuthUser(authUser).catch(() => {});
+    await signOut(provisioningAuth).catch(() => {});
+    throw error;
+  }
+  await signOut(provisioningAuth).catch(() => {});
+
+  for (const legacyDoc of legacyDocs) {
+    const legacyStoreId = legacyDoc.data().storeId;
+    if (legacyStoreId) {
+      await runTransaction(db, async (transaction) => {
+        const storeRef = doc(db, 'stores', legacyStoreId);
+        const storeSnapshot = await transaction.get(storeRef);
+        if (storeSnapshot.exists() && Array.isArray(storeSnapshot.data().cashierIds)) {
+          transaction.update(storeRef, {
+            cashierIds: storeSnapshot.data().cashierIds.filter((id) => id !== legacyDoc.id),
+          });
+        }
+      }).catch(() => {});
+    }
+    await deleteDoc(legacyDoc.ref);
+  }
+
+  return { id: uid, ...newUser };
 }
 
 export async function updateUser(userId, updates) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if (!userId) throw new Error('ID de usuario inválido.');
 
-  const cleanUpdates = { ...updates };
-  if (cleanUpdates.email) {
+  const cleanUpdates = {};
+  ['displayName', 'email', 'role', 'permissions', 'status', 'storeId'].forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(updates || {}, field)) {
+      cleanUpdates[field] = updates[field];
+    }
+  });
+  if (typeof cleanUpdates.email === 'string') {
     cleanUpdates.email = cleanUpdates.email.toLowerCase().trim();
-  }
-  if (cleanUpdates.username) {
-    cleanUpdates.username = cleanUpdates.username.toLowerCase().trim();
-
-    // Check if new username belongs to another user
-    const qUsername = query(collection(db, 'users'), where('username', '==', cleanUpdates.username));
-    const existUsername = await getDocs(qUsername);
-    if (!existUsername.empty && existUsername.docs[0].id !== userId) {
-      throw new Error(`El nombre de usuario "${cleanUpdates.username}" ya está en uso.`);
-    }
-  }
-
-  // Si se envió una nueva contraseña para actualizar
-  if (cleanUpdates.newPassword && cleanUpdates.newPassword.trim()) {
-    if (cleanUpdates.newPassword.trim().length < 4) {
-      throw new Error('La nueva contraseña debe tener al menos 4 caracteres.');
-    }
-    const salt = Math.random().toString(36).substring(2, 10);
-    cleanUpdates.passwordHash = await hashPassword(cleanUpdates.newPassword.trim(), salt);
-    cleanUpdates.salt = salt;
-    delete cleanUpdates.newPassword;
-  } else {
-    delete cleanUpdates.newPassword;
   }
 
   // Protect super admin: cannot demote or deactivate
@@ -441,6 +418,7 @@ export async function updateUser(userId, updates) {
   await updateDoc(userRef, cleanUpdates);
 }
 
+// Elimina el perfil: sin perfil la cuenta no puede leer ni escribir datos.
 export async function deleteUser(userId, email) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if ((email || '').toLowerCase().trim() === SUPER_ADMIN_EMAIL) {

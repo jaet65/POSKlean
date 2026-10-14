@@ -1,0 +1,309 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Identity: every signed-in person has a Firebase Auth uid. Username/password
+// accounts use a fictitious email "<username>@posklean.invalid"; the super admin
+// signs in with Google. Authorization always comes from the profile document
+// users/{uid}, never from data supplied by the caller.
+//
+// Collection: users            Document ID: Firebase Auth uid
+//   uid: string (== document ID), username?: string, email: string,
+//   displayName: string, photoURL?: string|null, authType: 'credentials'|'google',
+//   role: 'admin'|'supervisor'|'cajero'|'custom',
+//   status: 'active'|'inactive'|'pending',
+//   permissions: map {pos, inventory, sales, users: bool},
+//   storeId?: string, createdAt/updatedAt/lastLogin?: ISO string
+//
+// Collection: stores           Document ID: auto
+//   name, address?, phone?, status ('active'|'archived'), cashierIds: list<string>, ...
+//
+// Collection: products         Document ID: auto
+//   name, category, unit, color: string; currentStock, minStock, price, cost: number;
+//   storeId: string; createdBy: map; createdAt: timestamp; audit/restock metadata
+//
+// Collection: sales            Document ID: auto (immutable once created)
+//   ticketId, channel: string; items: list; total, liters: number;
+//   createdBy: map; storeId: string; timestamp: timestamp
+//
+// Collection: inventoryMovements   Document ID: auto (immutable once created)
+//   type, productId, productName, unit: string; amount, previousStock, newStock: number;
+//   createdBy: map; storeId: string; timestamp: timestamp; audit-only extra fields
+//
+// Known limits: stock/price numbers written by the client cannot be fully
+// verified server-side; a malicious cashier of a store could still alter stock or
+// sale totals for that store. Fixing that requires server-side code.
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // The super admin is bootstrapped by a verified Google account, so nobody can
+    // claim it by registering that address with email/password.
+    function isSuperAdmin() {
+      return isAuthenticated()
+        && request.auth.token.email == 'agrazmario@gmail.com'
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function profilePath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasProfile() {
+      return isAuthenticated() && exists(profilePath());
+    }
+
+    function profile() {
+      return get(profilePath()).data;
+    }
+
+    function isActiveStaff() {
+      return isSuperAdmin() || (hasProfile() && profile().status == 'active');
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || (isActiveStaff() && profile().role == 'admin');
+    }
+
+    // Cashiers are confined to their assigned store; other active roles see all stores.
+    function canAccessStore(storeId) {
+      return isAdmin()
+        || (isActiveStaff()
+          && storeId is string
+          && (profile().role != 'cajero'
+            || (profile().get('storeId', '') != '' && profile().storeId == storeId)));
+    }
+
+    function hasOnlyKeys(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // One-time migration: admins assign the default store to documents that have none.
+    function isLegacyStoreBackfill() {
+      return isAdmin()
+        && changedKeys().hasOnly(['storeId'])
+        && resource.data.get('storeId', '') == ''
+        && request.resource.data.storeId is string
+        && request.resource.data.storeId.size() > 0;
+    }
+
+    function validText(value, maxLen) {
+      return value is string && value.size() <= maxLen;
+    }
+
+    function validOptionalText(data, field, maxLen) {
+      return !(field in data) || data[field] == null || validText(data[field], maxLen);
+    }
+
+    function validNonNegative(value) {
+      return value is number && value >= 0 && value < 1000000000;
+    }
+
+    // The author recorded in a document must be the signed-in user.
+    function isOwnAuthorship(createdBy) {
+      return createdBy is map && createdBy.get('userId', null) == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function validPermissions(permissions) {
+      return permissions is map
+        && permissions.keys().hasOnly(['pos', 'inventory', 'sales', 'users'])
+        && permissions.keys().hasAll(['pos', 'inventory', 'sales', 'users'])
+        && permissions.pos is bool && permissions.inventory is bool
+        && permissions.sales is bool && permissions.users is bool;
+    }
+
+    function isValidUser(data) {
+      return data.role in ['admin', 'supervisor', 'cajero', 'custom']
+        && data.status in ['active', 'inactive', 'pending']
+        && validPermissions(data.permissions)
+        && validText(data.get('displayName', ''), 100)
+        && validText(data.get('email', ''), 200)
+        && validOptionalText(data, 'username', 40)
+        && validOptionalText(data, 'storeId', 100)
+        && validOptionalText(data, 'photoURL', 500)
+        && validOptionalText(data, 'createdAt', 40)
+        && validOptionalText(data, 'updatedAt', 40)
+        && validOptionalText(data, 'lastLogin', 40)
+        && data.get('authType', 'credentials') in ['credentials', 'google'];
+    }
+
+    function isNewUserProfile(data, userId) {
+      return hasOnlyKeys(data, ['uid', 'username', 'email', 'displayName', 'photoURL',
+          'authType', 'role', 'status', 'permissions', 'storeId', 'createdAt',
+          'updatedAt', 'lastLogin'])
+        && data.uid == userId
+        && data.keys().hasAll(['uid', 'email', 'displayName', 'authType', 'role', 'status', 'permissions'])
+        && isValidUser(data);
+    }
+
+    // A signed-in Google user may only create a pending, permission-less profile.
+    function isSelfRegistration(data) {
+      return hasOnlyKeys(data, ['uid', 'email', 'displayName', 'photoURL', 'authType',
+          'role', 'status', 'permissions', 'createdAt', 'lastLogin'])
+        && data.keys().hasAll(['uid', 'email', 'displayName', 'authType', 'role', 'status', 'permissions'])
+        && data.uid == request.auth.uid
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && data.email == request.auth.token.email.lower()
+        && data.authType == 'google'
+        && data.role == 'cajero'
+        && data.status == 'pending'
+        && data.permissions.pos == false && data.permissions.inventory == false
+        && data.permissions.sales == false && data.permissions.users == false
+        && isValidUser(data);
+    }
+
+    function isValidStore(data) {
+      return validText(data.get('name', ''), 120) && data.get('name', '') != ''
+        && validText(data.get('address', ''), 300)
+        && validText(data.get('phone', ''), 40)
+        && data.get('status', 'active') in ['active', 'archived']
+        && data.get('cashierIds', []) is list
+        && data.get('cashierIds', []).size() <= 200;
+    }
+
+    function hasValidProductFields(data) {
+      return validText(data.name, 120) && data.name.size() > 0
+        && validText(data.category, 60) && data.category.size() > 0
+        && validText(data.get('unit', 'L'), 10)
+        && validText(data.get('color', ''), 40)
+        && validNonNegative(data.currentStock)
+        && validNonNegative(data.minStock)
+        && validNonNegative(data.cost)
+        && validNonNegative(data.price) && data.price > 0
+        && data.storeId is string && data.storeId.size() > 0 && data.storeId.size() <= 100;
+    }
+
+    function isNewProduct(data) {
+      return hasOnlyKeys(data, ['name', 'category', 'currentStock', 'minStock', 'unit',
+          'price', 'cost', 'color', 'createdBy', 'storeId', 'createdAt'])
+        && data.keys().hasAll(['name', 'category', 'currentStock', 'minStock', 'price', 'cost',
+          'createdBy', 'storeId', 'createdAt'])
+        && hasValidProductFields(data)
+        && isOwnAuthorship(data.createdBy)
+        && data.createdAt == request.time;
+    }
+
+    function isValidSale(data) {
+      return hasOnlyKeys(data, ['ticketId', 'channel', 'items', 'total', 'liters',
+          'createdBy', 'storeId', 'timestamp'])
+        && data.keys().hasAll(['ticketId', 'channel', 'items', 'total', 'liters',
+          'createdBy', 'storeId', 'timestamp'])
+        && validText(data.ticketId, 40)
+        && validText(data.channel, 60) && data.channel.size() > 0
+        && data.items is list && data.items.size() > 0 && data.items.size() <= 100
+        && validNonNegative(data.total)
+        && validNonNegative(data.liters)
+        && isOwnAuthorship(data.createdBy)
+        && data.timestamp == request.time;
+    }
+
+    function isValidMovement(data) {
+      return data.type in ['sale', 'restock', 'initial', 'audit']
+        && validText(data.get('productId', ''), 100) && data.get('productId', '') != ''
+        && validText(data.get('productName', ''), 120)
+        && validText(data.get('unit', 'L'), 10)
+        && data.amount is number
+        && validNonNegative(data.newStock)
+        && data.previousStock is number
+        && isOwnAuthorship(data.createdBy)
+        && data.timestamp == request.time
+        && data.keys().size() <= 30;
+    }
+
+    // ===============================================================
+    // Rules (everything not matched below is denied)
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAdmin() || isOwner(userId);
+
+      allow create: if (isAdmin() && isNewUserProfile(request.resource.data, userId))
+        || (isOwner(userId) && isSelfRegistration(request.resource.data));
+
+      // Admins manage profiles; everyone else may only refresh their own last access data.
+      allow update: if (isAdmin()
+          && changedKeys().hasOnly(['username', 'email', 'displayName', 'photoURL', 'authType',
+            'role', 'status', 'permissions', 'storeId', 'updatedAt', 'lastLogin'])
+          && isValidUser(request.resource.data)
+          && request.resource.data.get('uid', userId) == userId)
+        || (isOwner(userId)
+          && changedKeys().hasOnly(['lastLogin', 'photoURL'])
+          && validOptionalText(request.resource.data, 'photoURL', 500)
+          && validOptionalText(request.resource.data, 'lastLogin', 40));
+
+      allow delete: if isAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow read: if isActiveStaff();
+      allow create, update: if isAdmin() && isValidStore(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      allow read: if canAccessStore(resource.data.get('storeId', null));
+
+      allow create: if canAccessStore(request.resource.data.storeId)
+        && isNewProduct(request.resource.data);
+
+      allow update: if isLegacyStoreBackfill()
+        || (request.resource.data.storeId == resource.data.get('storeId', null)
+        && canAccessStore(resource.data.get('storeId', null))
+        && validNonNegative(request.resource.data.currentStock)
+        && validNonNegative(request.resource.data.minStock)
+        && (
+          // Sales, restocks and audits adjust stock (and its audit trail) only.
+          changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt'])
+          // Only admins change catalog data and the alert threshold.
+          || (isAdmin()
+            && changedKeys().hasOnly(['name', 'category', 'currentStock', 'minStock', 'unit',
+              'price', 'cost', 'color', 'storeId', 'lastRestockedBy', 'lastRestockedAt',
+              'minStockUpdatedBy', 'minStockUpdatedAt'])
+            && hasValidProductFields(request.resource.data))
+        ));
+
+      allow delete: if isAdmin() && resource.data.currentStock == 0;
+    }
+
+    match /sales/{saleId} {
+      allow read: if canAccessStore(resource.data.get('storeId', null));
+      allow create: if canAccessStore(request.resource.data.storeId)
+        && isValidSale(request.resource.data);
+      allow update: if isLegacyStoreBackfill();
+      allow delete: if false;
+    }
+
+    match /inventoryMovements/{movementId} {
+      allow read: if canAccessStore(resource.data.get('storeId', null));
+      allow create: if canAccessStore(request.resource.data.storeId)
+        && isValidMovement(request.resource.data)
+        && (request.resource.data.type != 'audit' || isAdmin());
+      allow update: if isLegacyStoreBackfill();
+      allow delete: if false;
+    }
+  }
+}
