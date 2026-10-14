@@ -15,9 +15,9 @@ const requiredConfigFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
 const missingConfigFields = requiredConfigFields.filter((field) => !firebaseConfig[field]);
 
 export const firebaseConfigError = missingConfigFields.length
-  ? `Falta configurar Firebase. Completa ${missingConfigFields
+  ? `Falta configurar las variables de entorno de Firebase: ${missingConfigFields
     .map((field) => `VITE_FIREBASE_${field.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`)
-    .join(', ')} en el archivo .env.local.`
+    .join(', ')}.`
   : null;
 
 const app = firebaseConfigError
