@@ -1,20 +1,11 @@
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
   onSnapshot,
   runTransaction,
-  setDoc,
   updateDoc,
-  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-
-export const DEFAULT_STORE_ID = 'default';
-export const DEFAULT_STORE_NAME = 'Tienda Principal';
-
-const STORE_COLLECTIONS = ['products', 'sales', 'inventoryMovements'];
 
 export function subscribeToStores(callback, onError) {
   if (!db) {
@@ -33,32 +24,6 @@ export function subscribeToStores(callback, onError) {
       onError?.(error);
     },
   );
-}
-
-export async function ensureDefaultStore() {
-  if (!db) throw new Error('Firestore no está inicializado.');
-
-  const defaultStoreRef = doc(db, 'stores', DEFAULT_STORE_ID);
-  const defaultStoreSnapshot = await getDoc(defaultStoreRef);
-  if (!defaultStoreSnapshot.exists()) {
-    await setDoc(defaultStoreRef, {
-      name: DEFAULT_STORE_NAME,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  for (const collectionName of STORE_COLLECTIONS) {
-    const snapshot = await getDocs(collection(db, collectionName));
-    const legacyDocs = snapshot.docs.filter((documentSnapshot) => !documentSnapshot.data().storeId);
-    for (let index = 0; index < legacyDocs.length; index += 400) {
-      const batch = writeBatch(db);
-      legacyDocs.slice(index, index + 400).forEach((documentSnapshot) => {
-        batch.update(documentSnapshot.ref, { storeId: DEFAULT_STORE_ID });
-      });
-      await batch.commit();
-    }
-  }
 }
 
 const normalizeStoreDetails = ({ name, address, phone, cashierIds }) => {

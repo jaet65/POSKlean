@@ -98,14 +98,6 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
 
-    // One-time migration: admins assign the default store to documents that have none.
-    function isLegacyStoreBackfill() {
-      return isAdmin()
-        && changedKeys().hasOnly(['storeId'])
-        && resource.data.get('storeId', '') == ''
-        && request.resource.data.storeId is string
-        && request.resource.data.storeId.size() > 0;
-    }
 
     function validText(value, maxLen) {
       return value is string && value.size() <= maxLen;
@@ -270,8 +262,7 @@ service cloud.firestore {
       allow create: if canAccessStore(request.resource.data.storeId)
         && isNewProduct(request.resource.data);
 
-      allow update: if isLegacyStoreBackfill()
-        || (request.resource.data.storeId == resource.data.get('storeId', null)
+      allow update: if (request.resource.data.storeId == resource.data.get('storeId', null)
         && canAccessStore(resource.data.get('storeId', null))
         && validNonNegative(request.resource.data.currentStock)
         && validNonNegative(request.resource.data.minStock)
@@ -293,8 +284,7 @@ service cloud.firestore {
       allow read: if canAccessStore(resource.data.get('storeId', null));
       allow create: if canAccessStore(request.resource.data.storeId)
         && isValidSale(request.resource.data);
-      allow update: if isLegacyStoreBackfill();
-      allow delete: if false;
+      allow update, delete: if false;
     }
 
     match /inventoryMovements/{movementId} {
@@ -302,8 +292,7 @@ service cloud.firestore {
       allow create: if canAccessStore(request.resource.data.storeId)
         && isValidMovement(request.resource.data)
         && (request.resource.data.type != 'audit' || isAdmin());
-      allow update: if isLegacyStoreBackfill();
-      allow delete: if false;
+      allow update, delete: if false;
     }
   }
 }

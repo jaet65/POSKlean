@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
@@ -54,7 +54,6 @@ import {
 } from './services/userService';
 import {
   addStore as saveStore,
-  ensureDefaultStore,
   subscribeToStores,
   updateStore as saveStoreUpdate,
   updateStoreStatus as saveStoreStatus,
@@ -110,6 +109,8 @@ const INITIAL_DAY_RANGE = getCurrentDayRange();
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [stores, setStores] = useState([]);
+  const [storesLoaded, setStoresLoaded] = useState(false);
+  const hasPromptedFirstStore = useRef(false);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState(null);
@@ -217,16 +218,33 @@ export default function App() {
       return undefined;
     }
 
-    if (isAdmin) {
-      ensureDefaultStore().catch((error) => setStoreError(`No se pudo preparar la tienda principal: ${error.message}`));
-    }
-
     const unsubscribe = subscribeToStores(
-      (nextStores) => setStores(nextStores),
-      (error) => setStoreError(`No se pudieron cargar las tiendas: ${error.message}`),
+      (nextStores) => {
+        setStores(nextStores);
+        setStoresLoaded(true);
+      },
+      (error) => {
+        setStoreError(`No se pudieron cargar las tiendas: ${error.message}`);
+        setStoresLoaded(true);
+      },
     );
-    return () => unsubscribe();
-  }, [currentUser, currentUserId, currentUser?.status, isAdmin, isStoreManager]);
+    return () => {
+      unsubscribe();
+      setStoresLoaded(false);
+    };
+  }, [currentUser, currentUserId, currentUser?.status]);
+
+  // Primer inicio: si no existe ninguna tienda, se le pide al administrador crear una.
+  const needsFirstStore = Boolean(isAdmin && storesLoaded && stores.length === 0);
+  useEffect(() => {
+    if (needsFirstStore && !hasPromptedFirstStore.current) {
+      hasPromptedFirstStore.current = true;
+      setEditingStoreId(null);
+      setStoreForm({ name: '', address: '', phone: '', cashierIds: [] });
+      setStoreError('');
+      setIsStoreModalOpen(true);
+    }
+  }, [needsFirstStore]);
 
   useEffect(() => {
     if (!canAccessUsers) {
@@ -3423,6 +3441,12 @@ export default function App() {
                 ✕
               </button>
             </div>
+
+            {needsFirstStore && !editingStoreId && (
+              <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-xs text-cyan-200">
+                Aún no hay tiendas registradas. Crea la primera para comenzar a usar el sistema.
+              </div>
+            )}
 
             {storeError && (
               <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs text-red-300">
