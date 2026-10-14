@@ -101,6 +101,7 @@ export default function App() {
   const [isSavingSale, setIsSavingSale] = useState(false);
   const [isRestocking, setIsRestocking] = useState(false);
   const [saleToPrint, setSaleToPrint] = useState(null);
+  const [cashClosureToPrint, setCashClosureToPrint] = useState(null);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
   const [receiptWidth, setReceiptWidth] = useState('58');
   const [dayRange, setDayRange] = useState(INITIAL_DAY_RANGE);
@@ -207,13 +208,16 @@ export default function App() {
     : fallbackTabs[activeTab]?.find((tab) => tabPermissions[tab]) || activeTab;
 
   useEffect(() => {
-    if (!saleToPrint) return undefined;
+    if (!saleToPrint && !cashClosureToPrint) return undefined;
 
-    const clearPrintedSale = () => setSaleToPrint(null);
-    window.addEventListener('afterprint', clearPrintedSale);
+    const clearPrintedDocument = () => {
+      setSaleToPrint(null);
+      setCashClosureToPrint(null);
+    };
+    window.addEventListener('afterprint', clearPrintedDocument);
     window.print();
-    return () => window.removeEventListener('afterprint', clearPrintedSale);
-  }, [saleToPrint]);
+    return () => window.removeEventListener('afterprint', clearPrintedDocument);
+  }, [saleToPrint, cashClosureToPrint]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setDayRange(getCurrentDayRange()), 60_000);
@@ -239,6 +243,44 @@ export default function App() {
       (sale) => sale.createdBy?.userId === currentUserId,
     );
   }, [salesToday, isCajero, currentUserId]);
+
+  const cashClosureSummary = useMemo(() => {
+    const channels = new Map();
+    const products = new Map();
+    visibleSalesToday.forEach((sale) => {
+      const channel = sale.channel || 'Sin canal';
+      const current = channels.get(channel) || { total: 0, tickets: 0 };
+      channels.set(channel, {
+        total: current.total + sale.total,
+        tickets: current.tickets + 1,
+      });
+
+      sale.items.forEach((item) => {
+        const productKey = item.productId || item.name;
+        const currentProduct = products.get(productKey) || {
+          name: item.name,
+          unit: item.unit || 'L',
+          quantity: 0,
+          total: 0,
+        };
+        products.set(productKey, {
+          ...currentProduct,
+          quantity: currentProduct.quantity + item.qty,
+          total: currentProduct.total + (item.total ?? item.qty * item.price),
+        });
+      });
+    });
+
+    return {
+      total: visibleSalesToday.reduce((sum, sale) => sum + sale.total, 0),
+      tickets: visibleSalesToday.length,
+      liters: visibleSalesToday.reduce((sum, sale) => sum + sale.liters, 0),
+      channels: Array.from(channels, ([channel, summary]) => ({ channel, ...summary }))
+        .sort((first, second) => first.channel.localeCompare(second.channel, 'es')),
+      products: Array.from(products.values())
+        .sort((first, second) => second.total - first.total),
+    };
+  }, [visibleSalesToday]);
 
   const lowStockProducts = useMemo(() => {
     return products.filter((product) => product.currentStock <= product.minStock);
@@ -1919,6 +1961,83 @@ export default function App() {
               </div>
             </div>
 
+            <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-cyan-400" />
+                    Cierre de caja del día
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'long' })}
+                    {isCajero ? ' · Cierre personal' : ' · Cierre general'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCashClosureToPrint({
+                    ...cashClosureSummary,
+                    date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
+                    closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+                    closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
+                  })}
+                  disabled={cashClosureSummary.tickets === 0}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Printer className="w-4 h-4" />
+                  Imprimir cierre
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                <div>
+                  <p className="text-xs text-slate-400">Ventas registradas</p>
+                  <p className="text-xl font-bold font-mono text-emerald-400">${cashClosureSummary.total.toFixed(2)} MXN</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Tickets</p>
+                  <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.tickets}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Litros despachados</p>
+                  <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.liters.toFixed(2)} L</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5 border-t border-slate-700 pt-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por canal</p>
+                  {cashClosureSummary.channels.length === 0 ? (
+                    <p className="text-xs text-slate-500">Sin ventas registradas hoy.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {cashClosureSummary.channels.map(({ channel, tickets, total }) => (
+                        <div key={channel} className="flex justify-between gap-3 text-xs">
+                          <span className="text-slate-400">{channel} · {tickets} {tickets === 1 ? 'ticket' : 'tickets'}</span>
+                          <span className="font-mono font-semibold text-slate-200">${total.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por producto</p>
+                  {cashClosureSummary.products.length === 0 ? (
+                    <p className="text-xs text-slate-500">Sin productos vendidos hoy.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {cashClosureSummary.products.map(({ name, unit, quantity, total }) => (
+                        <div key={`${name}-${unit}`} className="flex justify-between gap-3 text-xs">
+                          <span className="text-slate-400 truncate">{name} · {quantity.toFixed(2)} {unit}</span>
+                          <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">${total.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
             {/* Sales Log Table */}
             <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
               <div className="p-4 border-b border-slate-700">
@@ -2555,6 +2674,37 @@ export default function App() {
           <p>Litros: {saleToPrint.liters.toFixed(2)} L</p>
           <p className="receipt-total">TOTAL: ${saleToPrint.total.toFixed(2)} MXN</p>
           <p className="receipt-thanks">¡Gracias por su compra!</p>
+        </section>
+      )}
+
+      {cashClosureToPrint && (
+        <section className={`print-ticket receipt-${receiptWidth}`} aria-label="Cierre de caja para imprimir">
+          <h1>POSKlean</h1>
+          <p className="receipt-thanks"><strong>CIERRE DE CAJA</strong></p>
+          <p>Fecha: {cashClosureToPrint.date}</p>
+          <p>Hora: {cashClosureToPrint.closedAt}</p>
+          <p>Responsable: {cashClosureToPrint.closedBy}</p>
+          <hr />
+          <div className="receipt-item"><span>Tickets</span><strong>{cashClosureToPrint.tickets}</strong></div>
+          <div className="receipt-item"><span>Litros</span><strong>{cashClosureToPrint.liters.toFixed(2)} L</strong></div>
+          <hr />
+          <p><strong>Ventas por canal</strong></p>
+          {cashClosureToPrint.channels.map(({ channel, tickets, total }) => (
+            <div className="receipt-item" key={channel}>
+              <span>{channel} ({tickets})</span>
+              <strong>${total.toFixed(2)}</strong>
+            </div>
+          ))}
+          <hr />
+          <p><strong>Ventas por producto</strong></p>
+          {cashClosureToPrint.products.map(({ name, unit, quantity, total }) => (
+            <div className="receipt-item" key={`${name}-${unit}`}>
+              <span>{name} · {quantity.toFixed(2)} {unit}</span>
+              <strong>${total.toFixed(2)}</strong>
+            </div>
+          ))}
+          <hr />
+          <p className="receipt-total">TOTAL: ${cashClosureToPrint.total.toFixed(2)} MXN</p>
         </section>
       )}
 
