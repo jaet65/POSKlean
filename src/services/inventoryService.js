@@ -160,3 +160,105 @@ export async function updateProductMinStock(productId, minStock, user = null) {
   });
 }
 
+export async function completeInventoryAudit({ auditType, counts, user = null }) {
+  if (!db) {
+    throw new Error('No se puede guardar la auditoría: configura primero Firebase.');
+  }
+  if (user?.role !== 'admin') {
+    throw new Error('Solo un administrador puede realizar auditorías de inventario.');
+  }
+  if (!['weekly', 'monthly'].includes(auditType)) {
+    throw new Error('Selecciona una frecuencia de auditoría válida.');
+  }
+  if (!Array.isArray(counts) || counts.length === 0 || counts.length > 250) {
+    throw new Error('La auditoría debe incluir entre 1 y 250 productos.');
+  }
+
+  const normalizedCounts = counts.map(({ productId, countedStock }) => ({
+    productId,
+    countedStock: Number(countedStock),
+  }));
+  if (normalizedCounts.some(({ productId, countedStock }) => (
+    !productId || !Number.isFinite(countedStock) || countedStock < 0
+      || Number((countedStock * 100).toFixed(0)) / 100 !== countedStock
+  )) || new Set(normalizedCounts.map(({ productId }) => productId)).size !== normalizedCounts.length) {
+    throw new Error('Captura un conteo válido, único y con máximo dos decimales para cada producto.');
+  }
+
+  const userInfo = {
+    userId: user.id || user.uid || null,
+    userName: user.displayName || user.username || user.email || 'Desconocido',
+    userEmail: user.email || '',
+    userRole: user.role,
+  };
+  const auditId = doc(collection(db, 'inventoryMovements')).id;
+  const productRefs = normalizedCounts.map(({ productId }) => doc(db, 'products', productId));
+  const movementRefs = normalizedCounts.map(() => doc(collection(db, 'inventoryMovements')));
+
+  return runTransaction(db, async (transaction) => {
+    const snapshots = await Promise.all(productRefs.map((productRef) => transaction.get(productRef)));
+    const lines = snapshots.map((snapshot, index) => {
+      if (!snapshot.exists()) {
+        throw new Error('Un producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
+      }
+
+      const product = snapshot.data();
+      const expectedStock = product.currentStock;
+      if (!Number.isFinite(expectedStock)) {
+        throw new Error(`El producto ${product.name || snapshot.id} tiene stock esperado inválido.`);
+      }
+
+      const countedStock = normalizedCounts[index].countedStock;
+      const difference = Number((countedStock - expectedStock).toFixed(2));
+      const shortage = Math.max(0, -difference);
+      const surplus = Math.max(0, difference);
+      const unitSalePrice = Number.isFinite(product.price) ? product.price : 0;
+
+      return {
+        productId: snapshot.id,
+        productName: product.name || '',
+        unit: product.unit || 'L',
+        expectedStock,
+        countedStock,
+        difference,
+        shortage,
+        surplus,
+        unitSalePrice,
+        lossValue: Number((shortage * unitSalePrice).toFixed(2)),
+        surplusValue: Number((surplus * unitSalePrice).toFixed(2)),
+      };
+    });
+
+    lines.forEach((line, index) => {
+      if (line.difference !== 0) {
+        transaction.update(productRefs[index], { currentStock: line.countedStock });
+      }
+      transaction.set(movementRefs[index], {
+        type: 'audit',
+        auditId,
+        auditType,
+        ...line,
+        productName: line.productName,
+        amount: line.difference,
+        previousStock: line.expectedStock,
+        newStock: line.countedStock,
+        referenceId: auditId,
+        createdBy: userInfo,
+        timestamp: serverTimestamp(),
+      });
+    });
+
+    return {
+      auditId,
+      auditType,
+      auditedProducts: lines.length,
+      adjustedProducts: lines.filter((line) => line.difference !== 0).length,
+      shortageUnits: Number(lines.reduce((sum, line) => sum + line.shortage, 0).toFixed(2)),
+      lossValue: Number(lines.reduce((sum, line) => sum + line.lossValue, 0).toFixed(2)),
+      surplusUnits: Number(lines.reduce((sum, line) => sum + line.surplus, 0).toFixed(2)),
+      surplusValue: Number(lines.reduce((sum, line) => sum + line.surplusValue, 0).toFixed(2)),
+      lines,
+    };
+  });
+}
+

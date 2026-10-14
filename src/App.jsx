@@ -25,12 +25,14 @@ import {
   Key,
   User,
   History,
+  ClipboardCheck,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
 import {
   addProduct as saveNewProduct,
   restockProduct as saveRestock,
   updateProductMinStock as saveMinStock,
+  completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
 import { createSale } from './services/salesService';
 import {
@@ -120,6 +122,12 @@ export default function App() {
   const [restockAmount, setRestockAmount] = useState('');
   const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
+  const [isInventoryAuditOpen, setIsInventoryAuditOpen] = useState(false);
+  const [inventoryAuditType, setInventoryAuditType] = useState('weekly');
+  const [inventoryAuditCounts, setInventoryAuditCounts] = useState({});
+  const [isSavingInventoryAudit, setIsSavingInventoryAudit] = useState(false);
+  const [inventoryAuditError, setInventoryAuditError] = useState('');
+  const [inventoryAuditResult, setInventoryAuditResult] = useState(null);
   const [editingMinStockProductId, setEditingMinStockProductId] = useState(null);
   const [minStockDraft, setMinStockDraft] = useState('');
   const [isSavingMinStock, setIsSavingMinStock] = useState(false);
@@ -282,6 +290,35 @@ export default function App() {
     };
   }, [visibleSalesToday]);
 
+  const inventoryAuditPreview = useMemo(() => products.reduce((summary, product) => {
+    const rawCount = inventoryAuditCounts[product.id];
+    if (rawCount === undefined || rawCount.trim() === '') return summary;
+
+    const countedStock = Number(rawCount);
+    if (!Number.isFinite(countedStock) || countedStock < 0
+      || Number((countedStock * 100).toFixed(0)) / 100 !== countedStock) {
+      return summary;
+    }
+
+    const difference = Number((countedStock - product.currentStock).toFixed(2));
+    const shortage = Math.max(0, -difference);
+    return {
+      countedProducts: summary.countedProducts + 1,
+      shortageUnits: summary.shortageUnits + shortage,
+      lossValue: summary.lossValue + shortage * product.price,
+      surplusUnits: summary.surplusUnits + Math.max(0, difference),
+      surplusValue: summary.surplusValue + Math.max(0, difference) * product.price,
+      adjustedProducts: summary.adjustedProducts + Number(difference !== 0),
+    };
+  }, {
+    countedProducts: 0,
+    shortageUnits: 0,
+    lossValue: 0,
+    surplusUnits: 0,
+    surplusValue: 0,
+    adjustedProducts: 0,
+  }), [products, inventoryAuditCounts]);
+
   const lowStockProducts = useMemo(() => {
     return products.filter((product) => product.currentStock <= product.minStock);
   }, [products]);
@@ -410,6 +447,42 @@ export default function App() {
     setRestockProduct(product);
     setRestockAmount('');
     setIsRestockOpen(true);
+  };
+
+  const handleOpenInventoryAudit = () => {
+    if (!isAdmin) return;
+    setInventoryAuditType('weekly');
+    setInventoryAuditCounts(Object.fromEntries(products.map((product) => [product.id, ''])));
+    setInventoryAuditError('');
+    setInventoryAuditResult(null);
+    setIsInventoryAuditOpen(true);
+  };
+
+  const handleCompleteInventoryAudit = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || isSavingInventoryAudit) return;
+    if (inventoryAuditPreview.countedProducts !== products.length || products.length === 0) {
+      setInventoryAuditError('Captura un conteo válido para cada producto antes de continuar.');
+      return;
+    }
+
+    setInventoryAuditError('');
+    setIsSavingInventoryAudit(true);
+    try {
+      const result = await saveInventoryAudit({
+        auditType: inventoryAuditType,
+        counts: products.map((product) => ({
+          productId: product.id,
+          countedStock: Number(inventoryAuditCounts[product.id]),
+        })),
+        user: currentUser,
+      });
+      setInventoryAuditResult(result);
+    } catch (error) {
+      setInventoryAuditError(error.message || 'No se pudo completar la auditoría.');
+    } finally {
+      setIsSavingInventoryAudit(false);
+    }
   };
 
   const handleApplyRestock = async (e) => {
@@ -1360,6 +1433,16 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleOpenInventoryAudit}
+                      className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-amber-500/30"
+                    >
+                      <ClipboardCheck className="w-4 h-4" />
+                      <span>Auditoría</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setIsInventoryHistoryOpen(true)}
@@ -1568,6 +1651,7 @@ export default function App() {
                         <option value="initial">Alta de producto</option>
                         <option value="restock">Resurtido</option>
                         <option value="sale">Venta</option>
+                        <option value="audit">Auditoría</option>
                       </select>
                     </div>
                     {movements.length === 0 ? (
@@ -1592,7 +1676,9 @@ export default function App() {
                                 ? 'Resurtido'
                                 : movement.type === 'sale'
                                   ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
-                                  : 'Producto creado';
+                                  : movement.type === 'audit'
+                                    ? `Auditoría ${movement.auditType === 'monthly' ? 'mensual' : 'semanal'}`
+                                    : 'Producto creado';
                               const quantity = Math.abs(movement.amount || 0);
                               return (
                                 <tr key={movement.id} className="hover:bg-slate-700/30">
@@ -1600,7 +1686,11 @@ export default function App() {
                                   <td className="px-3 py-3 font-semibold text-slate-100">{movementLabel}</td>
                                   <td className="px-3 py-3">{movement.productName || 'Producto'}</td>
                                   <td className="px-3 py-3 font-mono">
-                                    {movement.type === 'sale' ? '-' : '+'}{quantity} {movement.unit || ''}
+                                    {movement.type === 'audit'
+                                      ? movement.difference === 0
+                                        ? `Sin diferencia (${movement.countedStock} ${movement.unit || ''})`
+                                        : `${movement.difference < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}${(movement.lossValue ?? movement.lossCost) > 0 ? ` · pérdida $${(movement.lossValue ?? movement.lossCost).toFixed(2)}` : ''}`
+                                      : `${movement.amount < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}`}
                                   </td>
                                   <td className="px-3 py-3">
                                     <span className="text-slate-100">{movement.createdBy?.userName || 'Desconocido'}</span>
@@ -1616,6 +1706,237 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {isInventoryAuditOpen && isAdmin && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+                <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl">
+                  <div className="flex shrink-0 items-center justify-between border-b border-slate-700 p-5">
+                    <h3 className="flex items-center gap-2 text-base font-bold text-white">
+                      <ClipboardCheck className="h-5 w-5 text-amber-400" />
+                      {inventoryAuditResult
+                        ? `Auditoría ${inventoryAuditResult.auditType === 'weekly' ? 'semanal' : 'mensual'} completada`
+                        : 'Auditoría de inventario'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsInventoryAuditOpen(false)}
+                      disabled={isSavingInventoryAudit}
+                      aria-label="Cerrar auditoría"
+                      className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {inventoryAuditResult ? (
+                    <div className="space-y-4 overflow-y-auto p-5">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-lg bg-slate-900 p-3">
+                          <p className="text-[11px] text-slate-400">Productos contados</p>
+                          <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.auditedProducts}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-900 p-3">
+                          <p className="text-[11px] text-slate-400">Productos ajustados</p>
+                          <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.adjustedProducts}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-900 p-3">
+                          <p className="text-[11px] text-slate-400">Faltante</p>
+                          <p className="mt-1 font-mono text-lg font-bold text-rose-300">{inventoryAuditResult.shortageUnits.toFixed(2)}</p>
+                          <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: ${inventoryAuditResult.lossValue.toFixed(2)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-900 p-3">
+                          <p className="text-[11px] text-slate-400">Sobrante</p>
+                          <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{inventoryAuditResult.surplusUnits.toFixed(2)}</p>
+                          <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: ${inventoryAuditResult.surplusValue.toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-700">
+                        <table className="w-full min-w-[680px] text-left text-xs text-slate-300">
+                          <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                            <tr>
+                              <th className="px-3 py-3">Producto</th>
+                              <th className="px-3 py-3">Stock esperado</th>
+                              <th className="px-3 py-3">Conteo físico</th>
+                              <th className="px-3 py-3">Diferencia</th>
+                              <th className="px-3 py-3">Valor a precio de venta</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700/60">
+                            {inventoryAuditResult.lines.map((line) => (
+                              <tr key={line.productId}>
+                                <td className="px-3 py-2.5 font-medium text-slate-100">{line.productName}</td>
+                                <td className="px-3 py-2.5 font-mono">{line.expectedStock.toFixed(2)} {line.unit}</td>
+                                <td className="px-3 py-2.5 font-mono">{line.countedStock.toFixed(2)} {line.unit}</td>
+                                <td className={`px-3 py-2.5 font-mono font-semibold ${line.difference < 0 ? 'text-rose-300' : line.difference > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                  {line.difference > 0 ? '+' : ''}{line.difference.toFixed(2)} {line.unit}
+                                </td>
+                                <td className="px-3 py-2.5 font-mono text-rose-300">
+                                  {line.shortage > 0
+                                    ? `-$${line.lossValue.toFixed(2)}`
+                                    : line.surplus > 0
+                                      ? `+$${line.surplusValue.toFixed(2)}`
+                                      : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setIsInventoryAuditOpen(false)}
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleCompleteInventoryAudit} className="flex min-h-0 flex-1 flex-col">
+                      <div className="space-y-4 overflow-y-auto p-5">
+                        <div>
+                          <p className="mb-2 text-xs font-medium text-slate-300">Frecuencia del inventario</p>
+                          <div className="flex w-fit rounded-lg border border-slate-700 bg-slate-900 p-1">
+                            {[
+                              { value: 'weekly', label: 'Semanal' },
+                              { value: 'monthly', label: 'Mensual' },
+                            ].map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setInventoryAuditType(option.value)}
+                                className={`rounded-md px-4 py-2 text-xs font-semibold transition ${inventoryAuditType === option.value ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-400">
+                          Compara cada conteo físico con el stock esperado. Al guardar, las diferencias corregirán las existencias.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                            <p className="text-[11px] text-slate-400">Productos contados</p>
+                            <p className="mt-1 font-mono font-bold text-white">{inventoryAuditPreview.countedProducts} / {products.length}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                            <p className="text-[11px] text-slate-400">Faltante</p>
+                            <p className="mt-1 font-mono font-bold text-rose-300">{inventoryAuditPreview.shortageUnits.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: ${inventoryAuditPreview.lossValue.toFixed(2)}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                            <p className="text-[11px] text-slate-400">Sobrante</p>
+                            <p className="mt-1 font-mono font-bold text-emerald-300">{inventoryAuditPreview.surplusUnits.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: ${inventoryAuditPreview.surplusValue.toFixed(2)}</p>
+                          </div>
+                        </div>
+
+                        {products.length > 250 && (
+                          <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                            Esta auditoría admite hasta 250 productos por transacción.
+                          </p>
+                        )}
+                        {products.length === 0 ? (
+                          <p className="py-8 text-center text-sm text-slate-400">No hay productos para auditar.</p>
+                        ) : (
+                          <div className="max-h-[45vh] overflow-auto rounded-xl border border-slate-700">
+                            <table className="w-full min-w-[700px] text-left text-xs text-slate-300">
+                              <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                                <tr>
+                                  <th className="px-3 py-3">Producto</th>
+                                  <th className="px-3 py-3">Stock esperado</th>
+                                  <th className="px-3 py-3">Conteo físico</th>
+                                  <th className="px-3 py-3">Diferencia preliminar</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700/60">
+                                {products.map((product) => {
+                                  const rawCount = inventoryAuditCounts[product.id] ?? '';
+                                  const countedStock = rawCount === '' ? null : Number(rawCount);
+                                  const validCount = Number.isFinite(countedStock)
+                                    && countedStock >= 0
+                                    && Number((countedStock * 100).toFixed(0)) / 100 === countedStock;
+                                  const difference = validCount
+                                    ? Number((countedStock - product.currentStock).toFixed(2))
+                                    : null;
+                                  const shortage = difference === null ? 0 : Math.max(0, -difference);
+
+                                  return (
+                                    <tr key={product.id}>
+                                      <td className="px-3 py-2.5 font-medium text-slate-100">{product.name}</td>
+                                      <td className="px-3 py-2.5 font-mono">{product.currentStock.toFixed(2)} {product.unit}</td>
+                                      <td className="px-3 py-2.5">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          required
+                                          aria-label={`Conteo físico de ${product.name}`}
+                                          value={rawCount}
+                                          onChange={(event) => setInventoryAuditCounts((previous) => ({
+                                            ...previous,
+                                            [product.id]: event.target.value,
+                                          }))}
+                                          className="w-28 rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 font-mono text-white focus:outline-none focus:border-cyan-400"
+                                        />
+                                        <span className="ml-2 text-slate-400">{product.unit}</span>
+                                      </td>
+                                      <td className="px-3 py-2.5">
+                                        {difference === null ? (
+                                          <span className="text-slate-500">Pendiente</span>
+                                        ) : difference < 0 ? (
+                                          <span className="text-rose-300">Faltan {shortage.toFixed(2)} {product.unit} · ${((shortage * product.price)).toFixed(2)}</span>
+                                        ) : difference > 0 ? (
+                                          <span className="text-emerald-300">
+                                            Sobran +{difference.toFixed(2)} {product.unit} · ${(difference * product.price).toFixed(2)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-400">Sin diferencia</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {inventoryAuditError && (
+                          <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                            {inventoryAuditError}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex shrink-0 justify-end gap-2 border-t border-slate-700 p-4">
+                        <button
+                          type="button"
+                          onClick={() => setIsInventoryAuditOpen(false)}
+                          disabled={isSavingInventoryAudit}
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingInventoryAudit || products.length === 0 || products.length > 250 || inventoryAuditPreview.countedProducts !== products.length}
+                          className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <ClipboardCheck className="h-4 w-4" />
+                          {isSavingInventoryAudit ? 'Aplicando ajustes...' : 'Aplicar conteo y guardar'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               </div>
             )}
