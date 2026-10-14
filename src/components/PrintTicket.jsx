@@ -1,5 +1,6 @@
 import { Droplet } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
+import { formatOtherUnits } from '../utils/volume';
 
 export default function PrintTicket({ ticket, receiptWidth, stores }) {
   if (!ticket) return null;
@@ -42,7 +43,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
             </div>
           ))}
           <hr />
-          <p>Productos: {data.liters.toFixed(2)}</p>
+          <p>Artículos: {data.items.length}</p>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
             <span>Total:</span>
@@ -156,6 +157,10 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           <strong>{data.closedBy}</strong>
           <hr />
           <div className="receipt-item"><span>Tickets</span><strong>{data.tickets}</strong></div>
+          <div className="receipt-item"><span>Litros despachados</span><strong>{data.liters.toFixed(2)} L</strong></div>
+          {data.others?.length > 0 && (
+            <div className="receipt-item"><span>Otros</span><strong>{formatOtherUnits(data.others)}</strong></div>
+          )}
           <hr />
           <p><strong>Ventas por canal</strong></p>
           {data.channels.map(({ channel, tickets, total }) => (
@@ -166,8 +171,8 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           ))}
           <hr />
           <p><strong>Ventas por producto</strong></p>
-          {data.products.map(({ name, unit, quantity, total }) => (
-            <div className="receipt-item" key={`${name}-${unit}`}>
+          {data.products.map(({ key, name, unit, quantity, total }) => (
+            <div className="receipt-item" key={key}>
               <span>{name} · {quantity.toFixed(2)} {unit}</span>
               <strong>{formatCurrency(total)} MXN</strong>
             </div>

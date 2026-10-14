@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
+import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
 import { 
   ShoppingCart, 
@@ -307,6 +308,7 @@ export default function App() {
       sale.items.forEach((item) => {
         const productKey = item.productId || item.name;
         const currentProduct = products.get(productKey) || {
+          key: productKey,
           name: item.name,
           unit: item.unit || 'L',
           quantity: 0,
@@ -323,7 +325,7 @@ export default function App() {
     return {
       total: visibleSalesToday.reduce((sum, sale) => sum + sale.total, 0),
       tickets: visibleSalesToday.length,
-      liters: visibleSalesToday.reduce((sum, sale) => sum + sale.liters, 0),
+      ...summarizeVolume(visibleSalesToday.flatMap((sale) => sale.items)),
       channels: Array.from(channels, ([channel, summary]) => ({ channel, ...summary }))
         .sort((first, second) => first.channel.localeCompare(second.channel, 'es')),
       products: Array.from(products.values())
@@ -539,9 +541,7 @@ export default function App() {
     return cart.reduce((sum, item) => sum + item.total, 0);
   }, [cart]);
 
-  const cartTotalLiters = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.qty, 0);
-  }, [cart]);
+  const cartVolume = useMemo(() => summarizeVolume(cart), [cart]);
 
   const handleCompleteSale = async () => {
     if (isGeneralView || cart.length === 0 || isSavingSale) return;
@@ -1644,7 +1644,12 @@ export default function App() {
                   <div className="space-y-1.5 mb-4 text-xs">
                     <div className="flex justify-between text-slate-400">
                       <span>Total Volumen:</span>
-                      <span className="font-mono text-slate-200">{cartTotalLiters.toFixed(1)} Litros</span>
+                      <span className="font-mono text-slate-200">
+                        {[
+                          cartVolume.liters > 0 ? `${cartVolume.liters.toFixed(1)} L` : '',
+                          formatOtherUnits(cartVolume.others),
+                        ].filter(Boolean).join(' · ') || '—'}
+                      </span>
                     </div>
                     <div className="flex justify-between text-base font-bold text-white pt-1 border-t border-slate-700/50">
                       <span>Total a Cobrar:</span>
@@ -2759,8 +2764,11 @@ export default function App() {
                 <div>
                   <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Litros que Despaché Hoy' : 'Litros Despachados Hoy'}</p>
                   <p className="text-2xl font-bold text-white font-mono">
-                    {visibleSalesToday.reduce((acc, s) => acc + s.liters, 0).toFixed(1)} L
+                    {cashClosureSummary.liters.toFixed(1)} L
                   </p>
+                  {cashClosureSummary.others.length > 0 && (
+                    <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
+                  )}
                 </div>
               </div>
 
@@ -2818,6 +2826,9 @@ export default function App() {
                 <div>
                   <p className="text-xs text-slate-400">Litros despachados</p>
                   <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.liters.toFixed(2)} L</p>
+                  {cashClosureSummary.others.length > 0 && (
+                    <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
+                  )}
                 </div>
               </div>
 
@@ -2843,8 +2854,8 @@ export default function App() {
                     <p className="text-xs text-slate-500">Sin productos vendidos hoy.</p>
                   ) : (
                     <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                      {cashClosureSummary.products.map(({ name, unit, quantity, total }) => (
-                        <div key={`${name}-${unit}`} className="flex justify-between gap-3 text-xs">
+                      {cashClosureSummary.products.map(({ key, name, unit, quantity, total }) => (
+                        <div key={key} className="flex justify-between gap-3 text-xs">
                           <span className="text-slate-400 truncate">{name} · {quantity.toFixed(2)} {unit}</span>
                           <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">{formatCurrency(total)}</span>
                         </div>
@@ -2885,8 +2896,8 @@ export default function App() {
                       <th className="px-4 py-3">Hora / Fecha</th>
                       <th className="px-4 py-3">Canal</th>
                       <th className="px-4 py-3">Vendedor</th>
-                      <th className="px-4 py-3">Detalle Productos</th>
-                      <th className="px-4 py-3">Litros</th>
+                      <th className="px-4 py-3">Detalle</th>
+                      <th className="px-4 py-3">Cantidad</th>
                       <th className="px-4 py-3 text-right">Total ($ MXN)</th>
                     </tr>
                   </thead>
@@ -2926,11 +2937,17 @@ export default function App() {
                         <td className="px-4 py-3 text-slate-300 max-w-xs">
                           {sale.items.map((it, idx) => (
                             <span key={idx} className="block truncate">
-                              • {it.name} ({it.qty}L)
+                              • {it.name}
                             </span>
                           ))}
                         </td>
-                        <td className="px-4 py-3 font-mono text-slate-300">{sale.liters} L</td>
+                        <td className="px-4 py-3 font-mono text-slate-300">
+                          {sale.items.map((it, idx) => (
+                            <span key={it.productId || `${it.name}-${idx}`} className="block truncate">
+                              • {it.qty} {it.unit || 'L'}
+                            </span>
+                          ))}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400 text-sm">
                           <span>{formatCurrency(sale.total)}</span>
                           <button
