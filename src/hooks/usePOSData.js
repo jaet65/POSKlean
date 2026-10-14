@@ -22,9 +22,11 @@ const formatTimestamp = (timestamp) => {
 export function usePOSData() {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
+  const [movements, setMovements] = useState([]);
   const [productsReady, setProductsReady] = useState(false);
   const [salesReady, setSalesReady] = useState(false);
-  const [errors, setErrors] = useState({ products: null, sales: null });
+  const [movementsReady, setMovementsReady] = useState(false);
+  const [errors, setErrors] = useState({ products: null, sales: null, movements: null });
 
   useEffect(() => {
     if (!db) return undefined;
@@ -88,18 +90,48 @@ export function usePOSData() {
       },
     );
 
+    const unsubscribeMovements = onSnapshot(
+      collection(db, 'inventoryMovements'),
+      (snapshot) => {
+        try {
+          const nextMovements = snapshot.docs
+            .map((movDoc) => {
+              const data = movDoc.data();
+              return {
+                ...data,
+                id: movDoc.id,
+                ...formatTimestamp(data.timestamp),
+              };
+            })
+            .sort((a, b) => b.timestampMs - a.timestampMs);
+          setMovements(nextMovements);
+          setMovementsReady(true);
+          setErrors((previous) => ({ ...previous, movements: null }));
+        } catch (error) {
+          setMovementsReady(true);
+          setErrors((previous) => ({ ...previous, movements: error.message }));
+        }
+      },
+      (error) => {
+        setMovementsReady(true);
+        setErrors((previous) => ({ ...previous, movements: `No se pudieron cargar los movimientos: ${error.message}` }));
+      },
+    );
+
     return () => {
       unsubscribeProducts();
       unsubscribeSales();
+      unsubscribeMovements();
     };
   }, []);
 
   return {
     products,
     sales,
-    loading: Boolean(db) && (!productsReady || !salesReady),
+    movements,
+    loading: Boolean(db) && (!productsReady || !salesReady || !movementsReady),
     error: !db
       ? firebaseConfigError
-      : [errors.products, errors.sales].filter(Boolean).join(' '),
+      : [errors.products, errors.sales, errors.movements].filter(Boolean).join(' '),
   };
 }

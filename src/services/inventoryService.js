@@ -1,7 +1,7 @@
-import { addDoc, collection, doc, runTransaction } from 'firebase/firestore';
+import { addDoc, collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
-export async function addProduct(productData) {
+export async function addProduct(productData, user = null) {
   if (!db) {
     throw new Error('No se puede crear el producto: configura primero Firebase.');
   }
@@ -44,6 +44,13 @@ export async function addProduct(productData) {
     throw new Error('El costo por unidad debe ser un número mayor o igual a 0.');
   }
 
+  const userInfo = {
+    userId: user?.id || user?.uid || null,
+    userName: user?.displayName || user?.username || user?.email || 'Desconocido',
+    userEmail: user?.email || '',
+    userRole: user?.role || 'cajero',
+  };
+
   const newProduct = {
     name: trimmedName,
     category: trimmedCategory,
@@ -53,13 +60,32 @@ export async function addProduct(productData) {
     price: Number(numPrice.toFixed(2)),
     cost: Number(numCost.toFixed(2)),
     color: color || 'bg-cyan-500',
+    createdBy: userInfo,
+    createdAt: serverTimestamp(),
   };
 
   const docRef = await addDoc(collection(db, 'products'), newProduct);
+
+  // Si se dio de alta con stock inicial > 0, registrar movimiento de inventario
+  if (numCurrentStock > 0) {
+    await addDoc(collection(db, 'inventoryMovements'), {
+      type: 'initial',
+      productId: docRef.id,
+      productName: trimmedName,
+      unit: trimmedUnit,
+      amount: Number(numCurrentStock.toFixed(2)),
+      previousStock: 0,
+      newStock: Number(numCurrentStock.toFixed(2)),
+      referenceId: docRef.id,
+      createdBy: userInfo,
+      timestamp: serverTimestamp(),
+    });
+  }
+
   return { id: docRef.id, ...newProduct };
 }
 
-export async function restockProduct(productId, amount) {
+export async function restockProduct(productId, amount, user = null) {
   if (!db) {
     throw new Error('No se puede actualizar el inventario: configura primero Firebase.');
   }
@@ -68,20 +94,47 @@ export async function restockProduct(productId, amount) {
     throw new Error('Indica un producto y una cantidad de resurtido válida.');
   }
 
+  const userInfo = {
+    userId: user?.id || user?.uid || null,
+    userName: user?.displayName || user?.username || user?.email || 'Desconocido',
+    userEmail: user?.email || '',
+    userRole: user?.role || 'cajero',
+  };
+
   const productRef = doc(db, 'products', productId);
+  const movementRef = doc(collection(db, 'inventoryMovements'));
+
   await runTransaction(db, async (transaction) => {
     const productSnapshot = await transaction.get(productRef);
     if (!productSnapshot.exists()) {
       throw new Error('El producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
     }
 
-    const currentStock = productSnapshot.data().currentStock;
+    const productData = productSnapshot.data();
+    const currentStock = productData.currentStock;
     if (!Number.isFinite(currentStock)) {
       throw new Error(`El producto ${productId} no tiene un currentStock numérico.`);
     }
 
+    const newStock = Number((currentStock + amount).toFixed(2));
+
     transaction.update(productRef, {
-      currentStock: Number((currentStock + amount).toFixed(2)),
+      currentStock: newStock,
+      lastRestockedBy: userInfo,
+      lastRestockedAt: serverTimestamp(),
+    });
+
+    transaction.set(movementRef, {
+      type: 'restock',
+      productId,
+      productName: productData.name || '',
+      unit: productData.unit || 'L',
+      amount: Number(amount.toFixed(2)),
+      previousStock: currentStock,
+      newStock,
+      referenceId: productId,
+      createdBy: userInfo,
+      timestamp: serverTimestamp(),
     });
   });
 }

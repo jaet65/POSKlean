@@ -8,7 +8,7 @@ import { db } from '../firebase';
 
 const roundToCents = (value) => Number(value.toFixed(2));
 
-export async function createSale({ cart, channel }) {
+export async function createSale({ cart, channel, user }) {
   if (!db) {
     throw new Error('No se puede registrar la venta: configura primero Firebase.');
   }
@@ -34,6 +34,13 @@ export async function createSale({ cart, channel }) {
   const saleRef = doc(collection(db, 'sales'));
   const ticketId = `VTA-${saleRef.id.slice(0, 8).toUpperCase()}`;
   const productRefs = [...quantitiesByProduct.keys()].map((id) => doc(db, 'products', id));
+
+  const userInfo = {
+    userId: user?.id || user?.uid || null,
+    userName: user?.displayName || user?.username || user?.email || 'Desconocido',
+    userEmail: user?.email || '',
+    userRole: user?.role || 'cajero',
+  };
 
   return runTransaction(db, async (transaction) => {
     const productSnapshots = await Promise.all(
@@ -61,6 +68,7 @@ export async function createSale({ cart, channel }) {
         qty,
         price,
         total: roundToCents(qty * price),
+        previousStock: product.currentStock,
         newStock: Number((product.currentStock - qty).toFixed(2)),
       };
     });
@@ -70,14 +78,32 @@ export async function createSale({ cart, channel }) {
     const sale = {
       ticketId,
       channel: channel.trim(),
-      items: saleItems.map(({ newStock: _newStock, ...item }) => item),
+      items: saleItems.map(({ previousStock: _prev, newStock: _newStock, ...item }) => item),
       total,
       liters,
+      createdBy: userInfo,
     };
 
     saleItems.forEach((item, index) => {
       transaction.update(productRefs[index], { currentStock: item.newStock });
+
+      // Registrar movimiento de inventario por venta (salida)
+      const movementRef = doc(collection(db, 'inventoryMovements'));
+      transaction.set(movementRef, {
+        type: 'sale',
+        productId: item.productId,
+        productName: item.name,
+        unit: item.unit,
+        amount: -item.qty,
+        previousStock: item.previousStock,
+        newStock: item.newStock,
+        referenceId: saleRef.id,
+        ticketId,
+        createdBy: userInfo,
+        timestamp: serverTimestamp(),
+      });
     });
+
     transaction.set(saleRef, {
       ...sale,
       timestamp: serverTimestamp(),

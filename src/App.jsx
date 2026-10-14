@@ -49,7 +49,7 @@ const INITIAL_USER_FORM = {
   email: '',
   displayName: '',
   role: 'cajero',
-  permissions: { pos: true, inventory: true, sales: false, users: false },
+  permissions: { pos: true, inventory: true, sales: true, users: false },
   status: 'active',
 };
 
@@ -218,6 +218,24 @@ export default function App() {
     return salesHistory.filter((sale) => sale.timestampMs >= dayRange.start && sale.timestampMs < dayRange.end);
   }, [salesHistory, dayRange]);
 
+  // --- Filtrado por perfil: cajeros solo ven sus propias ventas ---
+  const isCajero = currentUser?.role === 'cajero';
+  const currentUserId = currentUser?.id || currentUser?.uid || null;
+
+  const visibleSalesHistory = useMemo(() => {
+    if (!isCajero || !currentUserId) return salesHistory;
+    return salesHistory.filter(
+      (sale) => sale.createdBy?.userId === currentUserId,
+    );
+  }, [salesHistory, isCajero, currentUserId]);
+
+  const visibleSalesToday = useMemo(() => {
+    if (!isCajero || !currentUserId) return salesToday;
+    return salesToday.filter(
+      (sale) => sale.createdBy?.userId === currentUserId,
+    );
+  }, [salesToday, isCajero, currentUserId]);
+
   const lowStockCount = useMemo(() => {
     return products.filter(p => p.currentStock <= p.minStock).length;
   }, [products]);
@@ -308,7 +326,7 @@ export default function App() {
     setActionError('');
     setIsSavingSale(true);
     try {
-      const sale = await createSale({ cart, channel: selectedChannel });
+      const sale = await createSale({ cart, channel: selectedChannel, user: currentUser });
       setCart([]);
       setLastCompletedSale(sale);
       setShowCheckoutSuccess(true);
@@ -337,7 +355,7 @@ export default function App() {
     setActionError('');
     setIsRestocking(true);
     try {
-      await saveRestock(restockProduct.id, amount);
+      await saveRestock(restockProduct.id, amount, currentUser);
       setIsRestockOpen(false);
       setRestockProduct(null);
       setRestockAmount('');
@@ -455,7 +473,7 @@ export default function App() {
         price: priceNum,
         cost: costNum,
         color: newProductForm.color || 'bg-cyan-500',
-      });
+      }, currentUser);
 
       setIsAddProductOpen(false);
       setAddProductSuccess(`¡Producto "${trimmedName}" registrado con éxito!`);
@@ -1679,6 +1697,14 @@ export default function App() {
         {activeTab === 'sales' && canAccessSales && (
           <div className="space-y-5">
             
+            {/* Indicador: cajero ve solo sus ventas */}
+            {isCajero && (
+              <div className="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl text-xs flex items-center gap-2">
+                <User className="w-4 h-4 shrink-0" />
+                <span>Estás viendo únicamente <strong>tus ventas</strong>. Los totales y el historial reflejan solo las transacciones que registraste.</span>
+              </div>
+            )}
+
             {/* Sales Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
@@ -1686,9 +1712,9 @@ export default function App() {
                   <DollarSign className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-medium">Venta Total del Día</p>
+                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mi Venta del Día' : 'Venta Total del Día'}</p>
                   <p className="text-2xl font-bold text-emerald-400 font-mono">
-                    ${salesToday.reduce((acc, s) => acc + s.total, 0).toFixed(2)} MXN
+                    ${visibleSalesToday.reduce((acc, s) => acc + s.total, 0).toFixed(2)} MXN
                   </p>
                 </div>
               </div>
@@ -1698,9 +1724,9 @@ export default function App() {
                   <Droplet className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-medium">Litros Despachados Hoy</p>
+                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Litros que Despaché Hoy' : 'Litros Despachados Hoy'}</p>
                   <p className="text-2xl font-bold text-white font-mono">
-                    {salesToday.reduce((acc, s) => acc + s.liters, 0).toFixed(1)} L
+                    {visibleSalesToday.reduce((acc, s) => acc + s.liters, 0).toFixed(1)} L
                   </p>
                 </div>
               </div>
@@ -1710,8 +1736,8 @@ export default function App() {
                   <TrendingUp className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-medium">Tickets Registrados</p>
-                  <p className="text-2xl font-bold text-white font-mono">{salesHistory.length}</p>
+                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mis Tickets' : 'Tickets Registrados'}</p>
+                  <p className="text-2xl font-bold text-white font-mono">{visibleSalesHistory.length}</p>
                 </div>
               </div>
             </div>
@@ -1745,13 +1771,14 @@ export default function App() {
                       <th className="px-4 py-3">Folio</th>
                       <th className="px-4 py-3">Hora / Fecha</th>
                       <th className="px-4 py-3">Canal</th>
+                      <th className="px-4 py-3">Vendedor</th>
                       <th className="px-4 py-3">Detalle Productos</th>
                       <th className="px-4 py-3">Litros</th>
                       <th className="px-4 py-3 text-right">Total ($ MXN)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/60">
-                    {salesHistory.map(sale => (
+                    {visibleSalesHistory.map(sale => (
                       <tr key={sale.id} className="hover:bg-slate-700/30 transition">
                         <td className="px-4 py-3 font-mono font-bold text-cyan-400">{sale.ticketId}</td>
                         <td className="px-4 py-3 text-slate-400">{sale.timestamp}</td>
@@ -1763,6 +1790,25 @@ export default function App() {
                           }`}>
                             {sale.channel}
                           </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <User className="w-3 h-3 text-slate-500 shrink-0" />
+                            <span className="text-slate-200 font-medium truncate max-w-[120px]">
+                              {sale.createdBy?.userName || 'Desconocido'}
+                            </span>
+                          </div>
+                          {sale.createdBy?.userRole && (
+                            <span className={`mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-semibold border ${
+                              sale.createdBy.userRole === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
+                              sale.createdBy.userRole === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                              'bg-slate-500/15 text-slate-400 border-slate-500/30'
+                            }`}>
+                              {sale.createdBy.userRole === 'admin' ? 'Admin' :
+                               sale.createdBy.userRole === 'supervisor' ? 'Supervisor' :
+                               sale.createdBy.userRole === 'cajero' ? 'Cajero' : sale.createdBy.userRole}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-slate-300 max-w-xs">
                           {sale.items.map((it, idx) => (
@@ -2178,7 +2224,7 @@ export default function App() {
               {/* Nombre Completo */}
               <div>
                 <label className="text-xs text-slate-300 block mb-1 font-medium">
-                  Nombre Completo: <span className="text-cyan-400">*</span>
+                  Nombre Completo: <span className="text-cyan-400"></span>
                 </label>
                 <input
                   type="text"

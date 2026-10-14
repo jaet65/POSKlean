@@ -24,7 +24,7 @@ const LOCAL_USER_SESSION_KEY = 'posklean_local_user';
 export const DEFAULT_PERMISSIONS = {
   admin: { pos: true, inventory: true, sales: true, users: true },
   supervisor: { pos: true, inventory: true, sales: true, users: false },
-  cajero: { pos: true, inventory: true, sales: false, users: false },
+  cajero: { pos: true, inventory: true, sales: true, users: false },
   custom: { pos: true, inventory: false, sales: false, users: false },
 };
 
