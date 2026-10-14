@@ -23,7 +23,8 @@ import {
   UserPlus,
   Lock,
   Key,
-  User
+  User,
+  History,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
 import { addProduct as saveNewProduct, restockProduct as saveRestock } from './services/inventoryService';
@@ -68,7 +69,7 @@ const PRODUCT_COLORS = [
 
 const INITIAL_PRODUCT_FORM = {
   name: '',
-  category: 'Alta Rotación',
+  category: 'Jabón',
   customCategory: '',
   currentStock: '0',
   minStock: '10',
@@ -91,7 +92,7 @@ const INITIAL_DAY_RANGE = getCurrentDayRange();
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
-  const { products, sales: salesHistory, loading, error: dataError } = usePOSData();
+  const { products, sales: salesHistory, movements, loading, error: dataError } = usePOSData();
   const [actionError, setActionError] = useState('');
   const [isSavingSale, setIsSavingSale] = useState(false);
   const [isRestocking, setIsRestocking] = useState(false);
@@ -113,6 +114,7 @@ export default function App() {
   const [isRestockOpen, setIsRestockOpen] = useState(false);
   const [restockProduct, setRestockProduct] = useState(null);
   const [restockAmount, setRestockAmount] = useState('');
+  const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
 
   // Add Product Modal State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -132,7 +134,6 @@ export default function App() {
 
   // Users Management State (Admin)
   const [usersList, setUsersList] = useState([]);
-  const [usersLoading, setUsersLoading] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState(INITIAL_USER_FORM);
@@ -155,50 +156,47 @@ export default function App() {
   const canAccessPos = currentUser?.role === 'admin' || currentUser?.permissions?.pos;
   const canAccessInventory = currentUser?.role === 'admin' || currentUser?.permissions?.inventory;
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
+  const currentUserId = currentUser?.id || currentUser?.uid || null;
+  const [usersLoadedForUserId, setUsersLoadedForUserId] = useState(null);
+  const usersLoading = Boolean(canAccessUsers && usersLoadedForUserId !== (currentUserId || 'unknown'));
 
   useEffect(() => {
     if (!canAccessUsers) {
       return undefined;
     }
-    setUsersLoading(true);
+    const userKey = currentUserId || 'unknown';
     const unsubscribe = subscribeToUsers(
       (list) => {
         setUsersList(list);
-        setUsersLoading(false);
+        setUsersLoadedForUserId(userKey);
       },
       (err) => {
         setActionError(`Error al cargar usuarios: ${err.message}`);
-        setUsersLoading(false);
+        setUsersLoadedForUserId(userKey);
       }
     );
     return () => unsubscribe();
-  }, [canAccessUsers]);
+  }, [canAccessUsers, currentUserId]);
 
   const pendingUsersCount = useMemo(() => {
     return usersList.filter(u => u.status === 'pending').length;
   }, [usersList]);
 
-  // Redirigir si la pestaña activa no está permitida para el usuario
-  useEffect(() => {
-    if (!currentUser || currentUser.status !== 'active') return;
-    if (activeTab === 'pos' && !canAccessPos) {
-      if (canAccessInventory) setActiveTab('inventory');
-      else if (canAccessSales) setActiveTab('sales');
-      else if (canAccessUsers) setActiveTab('users');
-    } else if (activeTab === 'inventory' && !canAccessInventory) {
-      if (canAccessPos) setActiveTab('pos');
-      else if (canAccessSales) setActiveTab('sales');
-      else if (canAccessUsers) setActiveTab('users');
-    } else if (activeTab === 'sales' && !canAccessSales) {
-      if (canAccessPos) setActiveTab('pos');
-      else if (canAccessInventory) setActiveTab('inventory');
-      else if (canAccessUsers) setActiveTab('users');
-    } else if (activeTab === 'users' && !canAccessUsers) {
-      if (canAccessPos) setActiveTab('pos');
-      else if (canAccessInventory) setActiveTab('inventory');
-      else if (canAccessSales) setActiveTab('sales');
-    }
-  }, [currentUser, activeTab, canAccessPos, canAccessInventory, canAccessSales, canAccessUsers]);
+  const tabPermissions = {
+    pos: canAccessPos,
+    inventory: canAccessInventory,
+    sales: canAccessSales,
+    users: canAccessUsers,
+  };
+  const fallbackTabs = {
+    pos: ['inventory', 'sales', 'users'],
+    inventory: ['pos', 'sales', 'users'],
+    sales: ['pos', 'inventory', 'users'],
+    users: ['pos', 'inventory', 'sales'],
+  };
+  const visibleTab = !currentUser || currentUser.status !== 'active' || tabPermissions[activeTab]
+    ? activeTab
+    : fallbackTabs[activeTab]?.find((tab) => tabPermissions[tab]) || activeTab;
 
   useEffect(() => {
     if (!saleToPrint) return undefined;
@@ -220,8 +218,6 @@ export default function App() {
 
   // --- Filtrado por perfil: cajeros solo ven sus propias ventas ---
   const isCajero = currentUser?.role === 'cajero';
-  const currentUserId = currentUser?.id || currentUser?.uid || null;
-
   const visibleSalesHistory = useMemo(() => {
     if (!isCajero || !currentUserId) return salesHistory;
     return salesHistory.filter(
@@ -245,7 +241,7 @@ export default function App() {
   }, [products]);
 
   const availableCategories = useMemo(() => {
-    const defaultCats = ['Alta Rotación', 'Media Rotación', 'Especializado'];
+    const defaultCats = ['Jabón', 'Suavizante'];
     const cats = new Set(defaultCats);
     products.forEach((p) => {
       if (p.category && typeof p.category === 'string' && p.category.trim()) {
@@ -366,15 +362,10 @@ export default function App() {
     }
   };
 
-  const suggestedPrice50 = useMemo(() => {
-    const numCost = parseFloat(newProductForm.cost);
-    return !isNaN(numCost) && numCost > 0 ? (numCost * 1.5).toFixed(2) : null;
-  }, [newProductForm.cost]);
-
   const handleOpenAddProduct = () => {
     setNewProductForm({
       ...INITIAL_PRODUCT_FORM,
-      category: availableCategories[0] || 'Alta Rotación',
+      category: availableCategories[0] || 'Jabón',
     });
     setProductFormError('');
     setIsAddProductOpen(true);
@@ -393,7 +384,7 @@ export default function App() {
       return {
         ...prev,
         cost: val,
-        price: shouldAutoFill ? (numCost * 1.5).toFixed(2) : prev.price,
+        price: shouldAutoFill ? (numCost / 0.5).toFixed(2) : prev.price,
         isPriceAutoSuggested: shouldAutoFill ? true : prev.isPriceAutoSuggested,
       };
     });
@@ -405,16 +396,6 @@ export default function App() {
       price: val,
       isPriceAutoSuggested: false,
     }));
-  };
-
-  const handleApplySuggestedPrice = () => {
-    if (suggestedPrice50) {
-      setNewProductForm(prev => ({
-        ...prev,
-        price: suggestedPrice50,
-        isPriceAutoSuggested: true,
-      }));
-    }
   };
 
   const handleCreateProduct = async (e) => {
@@ -901,7 +882,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('pos')}
               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'pos' 
+                visibleTab === 'pos' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
@@ -916,7 +897,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('inventory')}
               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
-                activeTab === 'inventory' 
+                visibleTab === 'inventory' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
@@ -936,7 +917,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('sales')}
               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'sales' 
+                visibleTab === 'sales' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
@@ -951,7 +932,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('users')}
               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
-                activeTab === 'users' 
+                visibleTab === 'users' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
@@ -985,7 +966,7 @@ export default function App() {
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
 
         {/* TAB 1: PUNTO DE VENTA (POS) */}
-        {activeTab === 'pos' && canAccessPos && (
+        {visibleTab === 'pos' && canAccessPos && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
             
             {/* Catalog & Quick Add (Left Column - 7/12) */}
@@ -1250,7 +1231,7 @@ export default function App() {
         )}
 
         {/* TAB 2: INVENTARIO & RESURTIDO */}
-        {activeTab === 'inventory' && canAccessInventory && (
+        {visibleTab === 'inventory' && canAccessInventory && (
           <div className="space-y-5">
             {addProductSuccess && (
               <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
@@ -1311,14 +1292,24 @@ export default function App() {
                   </h2>
                   <p className="text-xs text-slate-400 mt-0.5">Punto de reorden automático configurado</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleOpenAddProduct}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Nuevo Producto</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsInventoryHistoryOpen(true)}
+                    className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-600"
+                  >
+                    <History className="w-4 h-4" />
+                    <span>Historial</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddProduct}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Nuevo Producto</span>
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -1392,6 +1383,72 @@ export default function App() {
                 </table>
               </div>
             </div>
+
+            {isInventoryHistoryOpen && (
+              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+                  <div className="flex justify-between items-center border-b border-slate-700 p-5">
+                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                      <History className="w-5 h-5 text-cyan-400" />
+                      Historial de inventario
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsInventoryHistoryOpen(false)}
+                      aria-label="Cerrar historial"
+                      className="text-slate-400 hover:text-white p-1 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto p-5">
+                    {movements.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-10">Aún no hay movimientos registrados.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[650px] text-left text-xs text-slate-300">
+                          <thead className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
+                            <tr>
+                              <th className="px-3 py-3">Fecha</th>
+                              <th className="px-3 py-3">Movimiento</th>
+                              <th className="px-3 py-3">Producto</th>
+                              <th className="px-3 py-3">Cantidad</th>
+                              <th className="px-3 py-3">Responsable</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700/60">
+                            {movements.map((movement) => {
+                              const movementLabel = movement.type === 'restock'
+                                ? 'Resurtido'
+                                : movement.type === 'sale'
+                                  ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
+                                  : 'Producto creado';
+                              const quantity = Math.abs(movement.amount || 0);
+                              return (
+                                <tr key={movement.id} className="hover:bg-slate-700/30">
+                                  <td className="px-3 py-3 whitespace-nowrap">{movement.timestamp}</td>
+                                  <td className="px-3 py-3 font-semibold text-slate-100">{movementLabel}</td>
+                                  <td className="px-3 py-3">{movement.productName || 'Producto'}</td>
+                                  <td className="px-3 py-3 font-mono">
+                                    {movement.type === 'sale' ? '-' : '+'}{quantity} {movement.unit || ''}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <span className="text-slate-100">{movement.createdBy?.userName || 'Desconocido'}</span>
+                                    {movement.createdBy?.userRole && (
+                                      <span className="block text-[10px] text-slate-500">{movement.createdBy.userRole}</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Modal for Restock Input */}
             {isRestockOpen && restockProduct && (
@@ -1587,21 +1644,9 @@ export default function App() {
                       </div>
 
                       <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-xs text-slate-300 font-medium">
-                            Precio de Venta ($ MXN): <span className="text-cyan-400">*</span>
-                          </label>
-                          {suggestedPrice50 && (
-                            <button
-                              type="button"
-                              onClick={handleApplySuggestedPrice}
-                              className="text-[11px] bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 px-2 py-0.5 rounded-lg border border-cyan-500/40 transition flex items-center gap-1 cursor-pointer font-medium"
-                              title="Aplicar precio sugerido con 50% de ganancia sobre el costo"
-                            >
-                              <span>Sugerido (+50%): <strong>${suggestedPrice50}</strong></span>
-                            </button>
-                          )}
-                        </div>
+                        <label className="text-xs text-slate-300 font-medium block mb-1">
+                          Precio de Venta ($ MXN): <span className="text-cyan-400">*</span>
+                        </label>
                         <input
                           type="number"
                           step="0.01"
@@ -1613,7 +1658,7 @@ export default function App() {
                           className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-cyan-400"
                         />
                         <p className="text-[10px] text-slate-400 mt-1">
-                          Calculado automáticamente al 50% de ganancia o editable manualmente.
+                          Calculado automáticamente para un margen de venta del 50% o editable manualmente.
                         </p>
                       </div>
                     </div>
@@ -1694,7 +1739,7 @@ export default function App() {
         )}
 
         {/* TAB 3: VENTAS Y REPORTE DIARIO */}
-        {activeTab === 'sales' && canAccessSales && (
+        {visibleTab === 'sales' && canAccessSales && (
           <div className="space-y-5">
             
             {/* Indicador: cajero ve solo sus ventas */}
@@ -1840,7 +1885,7 @@ export default function App() {
         )}
 
         {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
-        {activeTab === 'users' && canAccessUsers && (
+        {visibleTab === 'users' && canAccessUsers && (
           <div className="space-y-5">
             {userSuccessMessage && (
               <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">

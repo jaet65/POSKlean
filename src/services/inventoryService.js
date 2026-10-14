@@ -66,21 +66,18 @@ export async function addProduct(productData, user = null) {
 
   const docRef = await addDoc(collection(db, 'products'), newProduct);
 
-  // Si se dio de alta con stock inicial > 0, registrar movimiento de inventario
-  if (numCurrentStock > 0) {
-    await addDoc(collection(db, 'inventoryMovements'), {
-      type: 'initial',
-      productId: docRef.id,
-      productName: trimmedName,
-      unit: trimmedUnit,
-      amount: Number(numCurrentStock.toFixed(2)),
-      previousStock: 0,
-      newStock: Number(numCurrentStock.toFixed(2)),
-      referenceId: docRef.id,
-      createdBy: userInfo,
-      timestamp: serverTimestamp(),
-    });
-  }
+  await addDoc(collection(db, 'inventoryMovements'), {
+    type: 'initial',
+    productId: docRef.id,
+    productName: trimmedName,
+    unit: trimmedUnit,
+    amount: Number(numCurrentStock.toFixed(2)),
+    previousStock: 0,
+    newStock: Number(numCurrentStock.toFixed(2)),
+    referenceId: docRef.id,
+    createdBy: userInfo,
+    timestamp: serverTimestamp(),
+  });
 
   return { id: docRef.id, ...newProduct };
 }
