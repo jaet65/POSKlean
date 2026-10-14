@@ -170,6 +170,14 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
             </div>
           ))}
           <hr />
+          <p><strong>Ventas por tienda</strong></p>
+          {data.stores.map(({ storeId, tickets, total }) => (
+            <div className="receipt-item" key={storeId || 'no-store'}>
+              <span>{stores.find((store) => store.id === storeId)?.name || storeId || 'Sin tienda'} ({tickets})</span>
+              <strong>{formatCurrency(total)} MXN</strong>
+            </div>
+          ))}
+          <hr />
           <p><strong>Ventas por producto</strong></p>
           {data.products.map(({ key, name, unit, quantity, total }) => (
             <div className="receipt-item" key={key}>

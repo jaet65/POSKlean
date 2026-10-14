@@ -296,8 +296,17 @@ export default function App() {
 
   const cashClosureSummary = useMemo(() => {
     const channels = new Map();
+    const storesSummary = new Map();
     const products = new Map();
     visibleSalesToday.forEach((sale) => {
+      const storeId = sale.storeId || null;
+      const currentStore = storesSummary.get(storeId) || { storeId, total: 0, tickets: 0 };
+      storesSummary.set(storeId, {
+        ...currentStore,
+        total: currentStore.total + sale.total,
+        tickets: currentStore.tickets + 1,
+      });
+
       const channel = sale.channel || 'Sin canal';
       const current = channels.get(channel) || { total: 0, tickets: 0 };
       channels.set(channel, {
@@ -328,6 +337,8 @@ export default function App() {
       ...summarizeVolume(visibleSalesToday.flatMap((sale) => sale.items)),
       channels: Array.from(channels, ([channel, summary]) => ({ channel, ...summary }))
         .sort((first, second) => first.channel.localeCompare(second.channel, 'es')),
+      stores: Array.from(storesSummary.values())
+        .sort((first, second) => second.total - first.total),
       products: Array.from(products.values())
         .sort((first, second) => second.total - first.total),
     };
