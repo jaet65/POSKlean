@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import PrintTicket from './components/PrintTicket';
+import { formatCurrency } from './utils/currency';
 import { 
   ShoppingCart, 
   Package, 
@@ -102,7 +104,6 @@ const getCurrentDayRange = () => {
 };
 
 const INITIAL_DAY_RANGE = getCurrentDayRange();
-
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [stores, setStores] = useState([]);
@@ -114,8 +115,7 @@ export default function App() {
   const [isSavingSale, setIsSavingSale] = useState(false);
   const [isRestocking, setIsRestocking] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState(null);
-  const [saleToPrint, setSaleToPrint] = useState(null);
-  const [cashClosureToPrint, setCashClosureToPrint] = useState(null);
+  const [ticketToPrint, setTicketToPrint] = useState(null);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
   const [receiptWidth, setReceiptWidth] = useState('58');
   const [dayRange, setDayRange] = useState(INITIAL_DAY_RANGE);
@@ -139,6 +139,7 @@ export default function App() {
   const [inventoryTargetStoreId, setInventoryTargetStoreId] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
   const [isInventoryAuditOpen, setIsInventoryAuditOpen] = useState(false);
+  const [showPreviousAuditTickets, setShowPreviousAuditTickets] = useState(false);
   const [inventoryAuditCounts, setInventoryAuditCounts] = useState({});
   const [isSavingInventoryAudit, setIsSavingInventoryAudit] = useState(false);
   const [inventoryAuditError, setInventoryAuditError] = useState('');
@@ -257,16 +258,15 @@ export default function App() {
     : fallbackTabs[activeTab]?.find((tab) => tabPermissions[tab]) || activeTab;
 
   useEffect(() => {
-    if (!saleToPrint && !cashClosureToPrint) return undefined;
+    if (!ticketToPrint) return undefined;
 
     const clearPrintedDocument = () => {
-      setSaleToPrint(null);
-      setCashClosureToPrint(null);
+      setTicketToPrint(null);
     };
     window.addEventListener('afterprint', clearPrintedDocument);
     window.print();
     return () => window.removeEventListener('afterprint', clearPrintedDocument);
-  }, [saleToPrint, cashClosureToPrint]);
+  }, [ticketToPrint]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setDayRange(getCurrentDayRange()), 60_000);
@@ -376,6 +376,56 @@ export default function App() {
       ? movements
       : movements.filter((movement) => movement.type === movementTypeFilter)
   ), [movements, movementTypeFilter]);
+
+  const previousInventoryAudits = useMemo(() => {
+    const auditsById = new Map();
+    movements
+      .filter((movement) => movement.type === 'audit')
+      .forEach((movement) => {
+        const auditId = movement.auditId || movement.referenceId;
+        if (!auditId) return;
+
+        const audit = auditsById.get(auditId) || {
+          auditId,
+          ticketId: movement.ticketId || `AUD-${auditId.slice(0, 8).toUpperCase()}`,
+          storeId: movement.storeId || null,
+          createdBy: movement.createdBy || { userName: 'Desconocido' },
+          timestamp: movement.timestamp || 'Fecha no disponible',
+          timestampMs: movement.timestampMs || 0,
+          lines: [],
+          shortageUnits: 0,
+          lossValue: 0,
+          surplusUnits: 0,
+          surplusValue: 0,
+        };
+        const line = {
+          productId: movement.productId || movement.id,
+          productName: movement.productName || 'Producto',
+          unit: movement.unit || 'L',
+          expectedStock: movement.expectedStock ?? movement.previousStock ?? 0,
+          countedStock: movement.countedStock ?? movement.newStock ?? 0,
+          difference: movement.difference ?? movement.amount ?? 0,
+          shortage: movement.shortage ?? Math.max(0, -(movement.difference ?? movement.amount ?? 0)),
+          surplus: movement.surplus ?? Math.max(0, movement.difference ?? movement.amount ?? 0),
+          lossValue: movement.lossValue ?? 0,
+          surplusValue: movement.surplusValue ?? 0,
+        };
+        audit.lines.push(line);
+        audit.shortageUnits += line.shortage;
+        audit.lossValue += line.lossValue;
+        audit.surplusUnits += line.surplus;
+        audit.surplusValue += line.surplusValue;
+        auditsById.set(auditId, audit);
+      });
+
+    return Array.from(auditsById.values())
+      .map((audit) => ({
+        ...audit,
+        auditedProducts: audit.lines.length,
+        adjustedProducts: audit.lines.filter((line) => line.difference !== 0).length,
+      }))
+      .sort((first, second) => second.timestampMs - first.timestampMs);
+  }, [movements]);
 
   const inventoryValueAtCost = useMemo(() => {
     return products.reduce((acc, product) => acc + (product.currentStock * product.cost), 0);
@@ -545,6 +595,7 @@ export default function App() {
     setInventoryAuditCounts(Object.fromEntries(productsToAudit.map((product) => [product.id, ''])));
     setInventoryAuditError('');
     setInventoryAuditResult(null);
+    setShowPreviousAuditTickets(false);
     setIsInventoryAuditOpen(true);
   };
 
@@ -1416,13 +1467,6 @@ export default function App() {
       )}
 
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
-        {isGeneralView && (
-          <div className="mb-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-xs text-cyan-200">
-            <strong>Vista General:</strong> estás consultando inventario y transacciones de todas las tiendas.
-            Punto de Venta no está disponible; para resurtir, selecciona la tienda destino en el formulario.
-          </div>
-        )}
-
         {/* TAB 1: PUNTO DE VENTA (POS) */}
         {visibleTab === 'pos' && canUsePos && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
@@ -1500,7 +1544,7 @@ export default function App() {
 
                       <div className="mt-3 pt-2 border-t border-slate-700/60 flex items-center justify-between">
                         <span className="text-xs text-slate-400">x {prod.unit}</span>
-                        <span className="text-base font-bold text-cyan-400">${prod.price.toFixed(2)}</span>
+                        <span className="text-base font-bold text-cyan-400">{formatCurrency(prod.price)}</span>
                       </div>
                     </button>
                   );
@@ -1566,7 +1610,7 @@ export default function App() {
                           <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-200 line-clamp-1">{item.name}</p>
-                              <p className="text-slate-400 text-[11px]">${item.price.toFixed(2)} / {item.unit}</p>
+                              <p className="text-slate-400 text-[11px]">{formatCurrency(item.price)} / {item.unit}</p>
                             </div>
                             <input
                               type="number"
@@ -1579,7 +1623,7 @@ export default function App() {
                               onBlur={() => handleCartQuantityBlur(item.id)}
                               className="w-full bg-slate-800 border border-slate-600 rounded-lg px-1.5 py-1.5 text-center font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
                             />
-                            <span className="font-bold text-slate-100 whitespace-nowrap">${item.total.toFixed(2)}</span>
+                            <span className="font-bold text-slate-100 whitespace-nowrap">{formatCurrency(item.total)}</span>
                             <button
                               type="button"
                               onClick={() => handleRemoveFromCart(item.id)}
@@ -1604,20 +1648,20 @@ export default function App() {
                     </div>
                     <div className="flex justify-between text-base font-bold text-white pt-1 border-t border-slate-700/50">
                       <span>Total a Cobrar:</span>
-                      <span className="text-xl text-cyan-400 font-mono">${cartTotal.toFixed(2)} MXN</span>
+                      <span className="text-xl text-cyan-400 font-mono">{formatCurrency(cartTotal)} MXN</span>
                     </div>
                   </div>
 
                   {showCheckoutSuccess && (
                     <div className="mb-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-2.5 rounded-xl text-xs flex items-center justify-center gap-2 animate-bounce">
                       <CheckCircle className="w-4 h-4" />
-                      <span>¡Venta registrada con éxito! {lastCompletedSale && `Total: $${lastCompletedSale.total.toFixed(2)}`}</span>
+                      <span>¡Venta registrada con éxito! {lastCompletedSale && `Total: ${formatCurrency(lastCompletedSale.total)}`}</span>
                     </div>
                   )}
                   {lastCompletedSale && (
                     <button
                       type="button"
-                      onClick={() => setSaleToPrint(lastCompletedSale)}
+                      onClick={() => setTicketToPrint({ type: 'sale', data: lastCompletedSale })}
                       className="mb-2 w-full py-2 rounded-xl border border-slate-600 text-xs font-semibold text-slate-200 hover:bg-slate-700 flex items-center justify-center gap-2"
                     >
                       <Printer className="w-4 h-4" />
@@ -1635,7 +1679,7 @@ export default function App() {
                     }`}
                   >
                     <DollarSign className="w-4 h-4" />
-                    {isSavingSale ? 'Procesando...' : `Registrar Cobro ($${cartTotal.toFixed(2)})`}
+                    {isSavingSale ? 'Procesando...' : `Registrar Cobro (${formatCurrency(cartTotal)})`}
                   </button>
                 </div>
               </div>
@@ -1672,10 +1716,10 @@ export default function App() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
-                  <p className="text-sm font-bold text-orange-400 font-mono">Compra: ${inventoryValueAtCost.toFixed(2)} MXN</p>
-                  <p className="text-sm font-bold text-emerald-400 font-mono">Venta: ${inventoryValueAtSalePrice.toFixed(2)} MXN</p>
+                  <p className="text-sm font-bold text-orange-400 font-mono">Compra: {formatCurrency(inventoryValueAtCost)} MXN</p>
+                  <p className="text-sm font-bold text-emerald-400 font-mono">Venta: {formatCurrency(inventoryValueAtSalePrice)} MXN</p>
                   <p className="text-sm font-bold text-purple-400 font-mono">
-                    Ganancia: ${(inventoryValueAtSalePrice - inventoryValueAtCost).toFixed(2)} MXN
+                    Ganancia: {formatCurrency(inventoryValueAtSalePrice - inventoryValueAtCost)} MXN
                   </p>
                 </div>
               </div>
@@ -1894,8 +1938,8 @@ export default function App() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-3 font-mono">${p.cost.toFixed(2)}</td>
-                            <td className="px-4 py-3 font-mono text-cyan-400 font-bold">${p.price.toFixed(2)}</td>
+                            <td className="px-4 py-3 font-mono">{formatCurrency(p.cost)}</td>
+                            <td className="px-4 py-3 font-mono text-cyan-400 font-bold">{formatCurrency(p.price)}</td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
@@ -1987,7 +2031,7 @@ export default function App() {
                                 : movement.type === 'sale'
                                   ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
                                   : movement.type === 'audit'
-                                    ? 'Auditoría'
+                                    ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`
                                     : 'Producto creado';
                               const quantity = Math.abs(movement.amount || 0);
                               return (
@@ -1999,7 +2043,7 @@ export default function App() {
                                     {movement.type === 'audit'
                                       ? movement.difference === 0
                                         ? `Sin diferencia (${movement.countedStock} ${movement.unit || ''})`
-                                        : `${movement.difference < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}${(movement.lossValue ?? movement.lossCost) > 0 ? ` · pérdida $${(movement.lossValue ?? movement.lossCost).toFixed(2)}` : ''}`
+                                        : `${movement.difference < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}${(movement.lossValue ?? movement.lossCost) > 0 ? ` · pérdida ${formatCurrency(movement.lossValue ?? movement.lossCost)}` : ''}`
                                       : `${movement.amount < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}`}
                                   </td>
                                   <td className="px-3 py-3">
@@ -2026,20 +2070,75 @@ export default function App() {
                   <div className="flex shrink-0 items-center justify-between border-b border-slate-700 p-5">
                     <h3 className="flex items-center gap-2 text-base font-bold text-white">
                       <ClipboardCheck className="h-5 w-5 text-amber-400" />
-                      {inventoryAuditResult ? 'Auditoría completada' : 'Auditoría de inventario'}
+                      {showPreviousAuditTickets
+                        ? 'Tickets previos'
+                        : inventoryAuditResult ? 'Auditoría completada' : 'Auditoría de inventario'}
                     </h3>
-                    <button
-                      type="button"
-                      onClick={() => setIsInventoryAuditOpen(false)}
-                      disabled={isSavingInventoryAudit}
-                      aria-label="Cerrar auditoría"
-                      className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {!showPreviousAuditTickets && (
+                        <button
+                          type="button"
+                          onClick={() => setShowPreviousAuditTickets(true)}
+                          className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                        >
+                          Tickets previos
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsInventoryAuditOpen(false)}
+                        disabled={isSavingInventoryAudit}
+                        aria-label="Cerrar auditoría"
+                        className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
 
-                  {inventoryAuditResult ? (
+                  {showPreviousAuditTickets ? (
+                    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+                      {previousInventoryAudits.length === 0 ? (
+                        <p className="py-8 text-center text-sm text-slate-400">
+                          No hay auditorías anteriores para esta vista.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {previousInventoryAudits.map((audit) => (
+                            <div
+                              key={audit.auditId}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/70 p-3"
+                            >
+                              <div className="min-w-0 text-xs">
+                                <p className="font-mono font-semibold text-slate-100">{audit.ticketId}</p>
+                                <p className="text-slate-400">
+                                  {audit.timestamp} · {storeNameById.get(audit.storeId) || audit.storeId || 'Sin tienda'}
+                                  {' · '}{audit.auditedProducts} productos
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setTicketToPrint({ type: 'audit', data: audit })}
+                                className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                                Imprimir ticket
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-auto flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setShowPreviousAuditTickets(false)}
+                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                        >
+                          Volver
+                        </button>
+                      </div>
+                    </div>
+                  ) : inventoryAuditResult ? (
                     <div className="space-y-4 overflow-y-auto p-5">
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         <div className="rounded-lg bg-slate-900 p-3">
@@ -2053,12 +2152,12 @@ export default function App() {
                         <div className="rounded-lg bg-slate-900 p-3">
                           <p className="text-[11px] text-slate-400">Faltante</p>
                           <p className="mt-1 font-mono text-lg font-bold text-rose-300">{inventoryAuditResult.shortageUnits.toFixed(2)}</p>
-                          <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: ${inventoryAuditResult.lossValue.toFixed(2)}</p>
+                          <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditResult.lossValue)}</p>
                         </div>
                         <div className="rounded-lg bg-slate-900 p-3">
                           <p className="text-[11px] text-slate-400">Sobrante</p>
                           <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{inventoryAuditResult.surplusUnits.toFixed(2)}</p>
-                          <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: ${inventoryAuditResult.surplusValue.toFixed(2)}</p>
+                          <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditResult.surplusValue)}</p>
                         </div>
                       </div>
 
@@ -2084,9 +2183,9 @@ export default function App() {
                                 </td>
                                 <td className="px-3 py-2.5 font-mono text-rose-300">
                                   {line.shortage > 0
-                                    ? `-$${line.lossValue.toFixed(2)}`
+                                    ? `-${formatCurrency(line.lossValue)}`
                                     : line.surplus > 0
-                                      ? `+$${line.surplusValue.toFixed(2)}`
+                                      ? `+${formatCurrency(line.surplusValue)}`
                                       : '—'}
                                 </td>
                               </tr>
@@ -2094,7 +2193,15 @@ export default function App() {
                           </tbody>
                         </table>
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setTicketToPrint({ type: 'audit', data: inventoryAuditResult })}
+                          className="flex items-center gap-2 rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                        >
+                          <Printer className="h-4 w-4" />
+                          Imprimir ticket
+                        </button>
                         <button
                           type="button"
                           onClick={() => setIsInventoryAuditOpen(false)}
@@ -2138,12 +2245,12 @@ export default function App() {
                           <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                             <p className="text-[11px] text-slate-400">Faltante</p>
                             <p className="mt-1 font-mono font-bold text-rose-300">{inventoryAuditPreview.shortageUnits.toFixed(2)}</p>
-                            <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: ${inventoryAuditPreview.lossValue.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditPreview.lossValue)}</p>
                           </div>
                           <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                             <p className="text-[11px] text-slate-400">Sobrante</p>
                             <p className="mt-1 font-mono font-bold text-emerald-300">{inventoryAuditPreview.surplusUnits.toFixed(2)}</p>
-                            <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: ${inventoryAuditPreview.surplusValue.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditPreview.surplusValue)}</p>
                           </div>
                         </div>
 
@@ -2201,10 +2308,10 @@ export default function App() {
                                         {difference === null ? (
                                           <span className="text-slate-500">Pendiente</span>
                                         ) : difference < 0 ? (
-                                          <span className="text-rose-300">Faltan {shortage.toFixed(2)} {product.unit} · ${((shortage * product.price)).toFixed(2)}</span>
+                                          <span className="text-rose-300">Faltan {shortage.toFixed(2)} {product.unit} · {formatCurrency(shortage * product.price)}</span>
                                         ) : difference > 0 ? (
                                           <span className="text-emerald-300">
-                                            Sobran +{difference.toFixed(2)} {product.unit} · ${(difference * product.price).toFixed(2)}
+                                            Sobran +{difference.toFixed(2)} {product.unit} · {formatCurrency(difference * product.price)}
                                           </span>
                                         ) : (
                                           <span className="text-slate-400">Sin diferencia</span>
@@ -2557,7 +2664,7 @@ export default function App() {
                           <div className="flex items-center justify-between">
                             <span className="text-slate-400">Ganancia neta por {newProductForm.unit}:</span>
                             <span className="font-mono font-bold text-emerald-400">
-                              +${profit.toFixed(2)} MXN
+                              +{formatCurrency(profit)} MXN
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800 pt-1.5">
@@ -2640,7 +2747,7 @@ export default function App() {
                 <div>
                   <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mi Venta del Día' : 'Venta Total del Día'}</p>
                   <p className="text-2xl font-bold text-emerald-400 font-mono">
-                    ${visibleSalesToday.reduce((acc, s) => acc + s.total, 0).toFixed(2)} MXN
+                    {formatCurrency(visibleSalesToday.reduce((acc, s) => acc + s.total, 0))} MXN
                   </p>
                 </div>
               </div>
@@ -2682,11 +2789,14 @@ export default function App() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setCashClosureToPrint({
-                    ...cashClosureSummary,
-                    date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
-                    closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
-                    closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
+                  onClick={() => setTicketToPrint({
+                    type: 'cashClosure',
+                    data: {
+                      ...cashClosureSummary,
+                      date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
+                      closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+                      closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
+                    },
                   })}
                   disabled={cashClosureSummary.tickets === 0}
                   className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2699,7 +2809,7 @@ export default function App() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
                 <div>
                   <p className="text-xs text-slate-400">Ventas registradas</p>
-                  <p className="text-xl font-bold font-mono text-emerald-400">${cashClosureSummary.total.toFixed(2)} MXN</p>
+                  <p className="text-xl font-bold font-mono text-emerald-400">{formatCurrency(cashClosureSummary.total)} MXN</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Tickets</p>
@@ -2721,7 +2831,7 @@ export default function App() {
                       {cashClosureSummary.channels.map(({ channel, tickets, total }) => (
                         <div key={channel} className="flex justify-between gap-3 text-xs">
                           <span className="text-slate-400">{channel} · {tickets} {tickets === 1 ? 'ticket' : 'tickets'}</span>
-                          <span className="font-mono font-semibold text-slate-200">${total.toFixed(2)}</span>
+                          <span className="font-mono font-semibold text-slate-200">{formatCurrency(total)}</span>
                         </div>
                       ))}
                     </div>
@@ -2736,7 +2846,7 @@ export default function App() {
                       {cashClosureSummary.products.map(({ name, unit, quantity, total }) => (
                         <div key={`${name}-${unit}`} className="flex justify-between gap-3 text-xs">
                           <span className="text-slate-400 truncate">{name} · {quantity.toFixed(2)} {unit}</span>
-                          <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">${total.toFixed(2)}</span>
+                          <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">{formatCurrency(total)}</span>
                         </div>
                       ))}
                     </div>
@@ -2822,10 +2932,10 @@ export default function App() {
                         </td>
                         <td className="px-4 py-3 font-mono text-slate-300">{sale.liters} L</td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400 text-sm">
-                          <span>${sale.total.toFixed(2)}</span>
+                          <span>{formatCurrency(sale.total)}</span>
                           <button
                             type="button"
-                            onClick={() => setSaleToPrint(sale)}
+                            onClick={() => setTicketToPrint({ type: 'sale', data: sale })}
                             className="ml-3 inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-cyan-500 hover:text-slate-950"
                           >
                             <Printer className="h-3 w-3" />
@@ -3427,57 +3537,7 @@ export default function App() {
         </div>
       )}
 
-      {saleToPrint && (
-        <section className={`print-ticket receipt-${receiptWidth}`} aria-label="Ticket para imprimir">
-          <h1>POSKlean</h1>
-          <p>Ticket: {saleToPrint.ticketId}</p>
-          <p>Fecha: {saleToPrint.timestamp}</p>
-          <p>Canal: {saleToPrint.channel}</p>
-          <hr />
-          {saleToPrint.items.map((item) => (
-            <div className="receipt-item" key={item.productId || item.name}>
-              <span>{item.name}</span>
-              <span>{item.qty} {item.unit || 'L'} × ${item.price.toFixed(2)}</span>
-              <strong>${item.total.toFixed(2)}</strong>
-            </div>
-          ))}
-          <hr />
-          <p>Litros: {saleToPrint.liters.toFixed(2)} L</p>
-          <p className="receipt-total">TOTAL: ${saleToPrint.total.toFixed(2)} MXN</p>
-          <p className="receipt-thanks">¡Gracias por su compra!</p>
-        </section>
-      )}
-
-      {cashClosureToPrint && (
-        <section className={`print-ticket receipt-${receiptWidth}`} aria-label="Cierre de caja para imprimir">
-          <h1>POSKlean</h1>
-          <p className="receipt-thanks"><strong>CIERRE DE CAJA</strong></p>
-          <p>Fecha: {cashClosureToPrint.date}</p>
-          <p>Hora: {cashClosureToPrint.closedAt}</p>
-          <p>Responsable: {cashClosureToPrint.closedBy}</p>
-          <hr />
-          <div className="receipt-item"><span>Tickets</span><strong>{cashClosureToPrint.tickets}</strong></div>
-          <div className="receipt-item"><span>Litros</span><strong>{cashClosureToPrint.liters.toFixed(2)} L</strong></div>
-          <hr />
-          <p><strong>Ventas por canal</strong></p>
-          {cashClosureToPrint.channels.map(({ channel, tickets, total }) => (
-            <div className="receipt-item" key={channel}>
-              <span>{channel} ({tickets})</span>
-              <strong>${total.toFixed(2)}</strong>
-            </div>
-          ))}
-          <hr />
-          <p><strong>Ventas por producto</strong></p>
-          {cashClosureToPrint.products.map(({ name, unit, quantity, total }) => (
-            <div className="receipt-item" key={`${name}-${unit}`}>
-              <span>{name} · {quantity.toFixed(2)} {unit}</span>
-              <strong>${total.toFixed(2)}</strong>
-            </div>
-          ))}
-          <hr />
-          <p className="receipt-total">TOTAL: ${cashClosureToPrint.total.toFixed(2)} MXN</p>
-        </section>
-      )}
+      <PrintTicket ticket={ticketToPrint} receiptWidth={receiptWidth} stores={stores} />
 
     </div>
   );

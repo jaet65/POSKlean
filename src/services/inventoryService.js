@@ -250,6 +250,7 @@ export async function completeInventoryAudit({ counts, user = null, storeId = nu
     userRole: user.role,
   };
   const auditId = doc(collection(db, 'inventoryMovements')).id;
+  const ticketId = `AUD-${auditId.slice(0, 8).toUpperCase()}`;
   const productRefs = normalizedCounts.map(({ productId }) => doc(db, 'products', productId));
   const movementRefs = normalizedCounts.map(() => doc(collection(db, 'inventoryMovements')));
 
@@ -294,6 +295,7 @@ export async function completeInventoryAudit({ counts, user = null, storeId = nu
       transaction.set(movementRefs[index], {
         type: 'audit',
         auditId,
+        ticketId,
         ...line,
         productName: line.productName,
         amount: line.difference,
@@ -308,6 +310,10 @@ export async function completeInventoryAudit({ counts, user = null, storeId = nu
 
     return {
       auditId,
+      ticketId,
+      storeId,
+      createdBy: userInfo,
+      timestamp: new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
       auditedProducts: lines.length,
       adjustedProducts: lines.filter((line) => line.difference !== 0).length,
       shortageUnits: Number(lines.reduce((sum, line) => sum + line.shortage, 0).toFixed(2)),
