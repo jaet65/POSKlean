@@ -55,6 +55,8 @@ import {
   addStore as saveStore,
   ensureDefaultStore,
   subscribeToStores,
+  updateStore as saveStoreUpdate,
+  updateStoreStatus as saveStoreStatus,
 } from './services/storeService';
 
 const INITIAL_USER_FORM = {
@@ -109,7 +111,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [stores, setStores] = useState([]);
   const [selectedStoreId, setSelectedStoreId] = useState(null);
-  const [newStoreName, setNewStoreName] = useState('');
+  const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
+  const [editingStoreId, setEditingStoreId] = useState(null);
+  const [storeForm, setStoreForm] = useState({ name: '', address: '', phone: '', cashierIds: [] });
   const [storeError, setStoreError] = useState('');
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -168,6 +172,10 @@ export default function App() {
     currentUser?.role === 'cajero' ? currentUser?.storeId : selectedStoreId,
     Boolean(currentUser?.status === 'active'
       && (currentUser?.role !== 'cajero' || currentUser?.storeId)),
+  );
+  const activeStores = useMemo(
+    () => stores.filter((store) => store.status !== 'archived'),
+    [stores],
   );
 
   // Users Management State (Admin)
@@ -917,14 +925,70 @@ export default function App() {
 
   const handleSaveStore = async (event) => {
     event.preventDefault();
-    if (!isAdmin || isGeneralView || isSavingStore) return;
+    if (!isAdmin || isSavingStore) return;
     setStoreError('');
     setIsSavingStore(true);
     try {
-      await saveStore(newStoreName);
-      setNewStoreName('');
+      if (editingStoreId) {
+        const previousCashierIds = usersList
+          .filter((user) => user.role === 'cajero' && user.storeId === editingStoreId)
+          .map((user) => user.id);
+        await saveStoreUpdate(editingStoreId, { ...storeForm, previousCashierIds });
+      } else {
+        await saveStore({ ...storeForm, previousCashierIds: [] });
+      }
+      setIsStoreModalOpen(false);
+      setEditingStoreId(null);
+      setStoreForm({ name: '', address: '', phone: '', cashierIds: [] });
     } catch (error) {
-      setStoreError(error.message || 'No se pudo crear la tienda.');
+      setStoreError(error.message || 'No se pudo guardar la tienda.');
+    } finally {
+      setIsSavingStore(false);
+    }
+  };
+
+  const handleOpenStoreModal = (store = null) => {
+    setEditingStoreId(store?.id || null);
+    setStoreForm(store ? {
+      name: store.name || '',
+      address: store.address || '',
+      phone: store.phone || '',
+      cashierIds: usersLoading && Array.isArray(store.cashierIds)
+        ? store.cashierIds
+        : usersList
+          .filter((user) => user.role === 'cajero' && user.storeId === store.id)
+          .map((user) => user.id),
+    } : { name: '', address: '', phone: '', cashierIds: [] });
+    setStoreError('');
+    setIsStoreModalOpen(true);
+  };
+
+  const handleCloseStoreModal = () => {
+    if (isSavingStore) return;
+    setIsStoreModalOpen(false);
+    setEditingStoreId(null);
+    setStoreForm({ name: '', address: '', phone: '', cashierIds: [] });
+    setStoreError('');
+  };
+
+  const handleStoreStatusChange = async (store, status) => {
+    if (!isAdmin || isSavingStore) return;
+    const isArchiving = status === 'archived';
+    const action = isArchiving ? 'archivar' : 'reactivar';
+    const confirmation = isArchiving
+      ? `¿Archivar "${store.name}"? Se conservarán sus ventas e inventario históricos, pero dejará de aparecer para nuevas asignaciones.`
+      : `¿Reactivar "${store.name}"?`;
+    if (!window.confirm(confirmation)) return;
+
+    setStoreError('');
+    setIsSavingStore(true);
+    try {
+      await saveStoreStatus(store.id, status);
+      if (isArchiving && selectedStoreId === store.id) {
+        handleStoreChange('');
+      }
+    } catch (error) {
+      setStoreError(`No se pudo ${action} la tienda: ${error.message}`);
     } finally {
       setIsSavingStore(false);
     }
@@ -979,7 +1043,9 @@ export default function App() {
     setUserForm(prev => ({
       ...prev,
       role: newRole,
-      storeId: newRole === 'cajero' ? prev.storeId : '',
+      storeId: newRole === 'cajero'
+        ? prev.storeId || (editingUser?.role === 'cajero' ? editingUser.storeId || '' : '')
+        : '',
       permissions: newRole === 'custom' ? prev.permissions : defaultPerms,
     }));
   };
@@ -997,7 +1063,7 @@ export default function App() {
 
   const handleSaveUser = async (e) => {
     e.preventDefault();
-    if (isGeneralView || isSavingUser) return;
+    if (isSavingUser) return;
 
     if (userForm.authType === 'credentials') {
       const cleanUsername = userForm.username.toLowerCase().trim();
@@ -1050,7 +1116,6 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userToDelete) => {
-    if (isGeneralView) return;
     if (userToDelete.email?.toLowerCase() === SUPER_ADMIN_EMAIL) {
       alert('No es posible eliminar al Administrador Principal (agrazmario@gmail.com).');
       return;
@@ -1322,13 +1387,25 @@ export default function App() {
                 className="max-w-40 bg-transparent text-slate-200 font-semibold focus:outline-none"
               >
                 <option value="" className="bg-slate-800">General</option>
-                {stores.map((store) => (
+                {activeStores.map((store) => (
                   <option key={store.id} value={store.id} className="bg-slate-800">
                     {store.name}
                   </option>
                 ))}
               </select>
             </label>
+          )}
+          {currentUser.role === 'cajero' && (
+            <div
+              aria-label={`Tienda activa: ${storeNameById.get(activeStoreId) || activeStoreId}`}
+              className="flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 py-1.5 text-xs"
+            >
+              <Store className="h-4 w-4 shrink-0 text-cyan-400" />
+              <span className="text-slate-400">Tienda activa:</span>
+              <strong className="max-w-40 truncate text-slate-200">
+                {storeNameById.get(activeStoreId) || activeStoreId}
+              </strong>
+            </div>
           )}
 
           {canAccessInventory && lowStockCount > 0 && (
@@ -1452,7 +1529,7 @@ export default function App() {
               }`}
             >
               <Users className="w-4 h-4" />
-              <span>Usuarios</span>
+              <span>Administración</span>
               {pendingUsersCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
                   {pendingUsersCount}
@@ -1726,19 +1803,21 @@ export default function App() {
             
             {/* Header Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
-                  <Layers className="w-6 h-6" />
+              {currentUser.role !== 'cajero' && (
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+                    <Layers className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
+                    <p className="text-sm font-bold text-orange-400 font-mono">Compra: {formatCurrency(inventoryValueAtCost)} MXN</p>
+                    <p className="text-sm font-bold text-emerald-400 font-mono">Venta: {formatCurrency(inventoryValueAtSalePrice)} MXN</p>
+                    <p className="text-sm font-bold text-purple-400 font-mono">
+                      Ganancia: {formatCurrency(inventoryValueAtSalePrice - inventoryValueAtCost)} MXN
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
-                  <p className="text-sm font-bold text-orange-400 font-mono">Compra: {formatCurrency(inventoryValueAtCost)} MXN</p>
-                  <p className="text-sm font-bold text-emerald-400 font-mono">Venta: {formatCurrency(inventoryValueAtSalePrice)} MXN</p>
-                  <p className="text-sm font-bold text-purple-400 font-mono">
-                    Ganancia: {formatCurrency(inventoryValueAtSalePrice - inventoryValueAtCost)} MXN
-                  </p>
-                </div>
-              </div>
+              )}
 
               {lowStockCount > 0 && (
                 <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
@@ -2242,7 +2321,7 @@ export default function App() {
                               className="w-full max-w-sm rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none"
                             >
                               <option value="">Selecciona una tienda</option>
-                              {stores.map((store) => (
+                              {activeStores.map((store) => (
                                 <option key={store.id} value={store.id}>{store.name}</option>
                               ))}
                             </select>
@@ -2407,7 +2486,7 @@ export default function App() {
                           className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
                         >
                           <option value="">Selecciona una tienda</option>
-                          {stores.map((store) => (
+                          {activeStores.map((store) => (
                             <option key={store.id} value={store.id}>{store.name}</option>
                           ))}
                         </select>
@@ -2521,7 +2600,7 @@ export default function App() {
                           className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
                         >
                           <option value="">Selecciona una tienda</option>
-                          {stores.map((store) => (
+                          {activeStores.map((store) => (
                             <option key={store.id} value={store.id}>{store.name}</option>
                           ))}
                         </select>
@@ -2885,17 +2964,6 @@ export default function App() {
                     <TrendingUp className="w-5 h-5 text-cyan-400" />
                     Historial de Transacciones Recientes
                   </h2>
-                  <label className="flex items-center gap-2 text-xs text-slate-400">
-                    Ancho del ticket
-                    <select
-                      value={receiptWidth}
-                      onChange={(event) => setReceiptWidth(event.target.value)}
-                      className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200"
-                    >
-                      <option value="58">58 mm</option>
-                      <option value="80">80 mm</option>
-                    </select>
-                  </label>
                 </div>
               </div>
 
@@ -2983,6 +3051,26 @@ export default function App() {
         {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
         {visibleTab === 'users' && canAccessUsers && (
           <div className="space-y-5">
+            <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-white">Configuración de impresión</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Selecciona el ancho del papel para los tickets.</p>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-400">
+                  Ancho del ticket
+                  <select
+                    value={receiptWidth}
+                    onChange={(event) => setReceiptWidth(event.target.value)}
+                    className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200"
+                  >
+                    <option value="58">58 mm</option>
+                    <option value="80">80 mm</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
             {userSuccessMessage && (
               <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -3040,42 +3128,82 @@ export default function App() {
               </div>
             </div>
 
-            {isAdmin && !isGeneralView && (
+            {isAdmin && (
               <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md space-y-3">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <Store className="w-5 h-5 text-cyan-400" />
-                    Tiendas
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Administra las tiendas disponibles para supervisores y cajeros.
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <Store className="w-5 h-5 text-cyan-400" />
+                      Tiendas
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Administra la información de las tiendas y los cajeros asignados.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenStoreModal()}
+                    className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-400"
+                  >
+                    Agregar tienda
+                  </button>
                 </div>
                 {storeError && (
                   <p className="text-xs text-red-300">{storeError}</p>
                 )}
-                <form onSubmit={handleSaveStore} className="flex flex-wrap gap-2">
-                  <input
-                    type="text"
-                    value={newStoreName}
-                    onChange={(event) => setNewStoreName(event.target.value)}
-                    placeholder="Nombre de la nueva tienda"
-                    className="flex-1 min-w-52 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isSavingStore}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition disabled:opacity-50"
-                  >
-                    {isSavingStore ? 'Guardando...' : 'Agregar tienda'}
-                  </button>
-                </form>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2 sm:grid-cols-2">
                   {stores.map((store) => (
-                    <span key={store.id} className="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-300">
-                      <Store className="w-3.5 h-3.5 text-cyan-400" />
-                      {store.name}
-                    </span>
+                    <div key={store.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-300">
+                            <Store className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                            <span className="truncate">{store.name}</span>
+                            {store.status === 'archived' && (
+                              <span className="shrink-0 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">
+                                Archivada
+                              </span>
+                            )}
+                        </span>
+                        {store.address && <p className="mt-1 truncate text-[11px] text-slate-400">{store.address}</p>}
+                        {store.phone && <p className="text-[11px] text-slate-400">{store.phone}</p>}
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Cajeros: {usersList
+                            .filter((user) => user.role === 'cajero' && user.storeId === store.id)
+                            .map((user) => user.displayName || user.username || user.email)
+                            .join(', ') || 'Sin asignar'}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenStoreModal(store)}
+                          disabled={isSavingStore}
+                          className="rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                        >
+                          Editar
+                        </button>
+                        {store.status !== 'archived' && (
+                          <button
+                            type="button"
+                            onClick={() => handleStoreStatusChange(store, 'archived')}
+                            disabled={isSavingStore}
+                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                          >
+                            Archivar
+                          </button>
+                        )}
+                        {store.status === 'archived' && (
+                          <button
+                            type="button"
+                            onClick={() => handleStoreStatusChange(store, 'active')}
+                            disabled={isSavingStore}
+                            className="rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                          >
+                            Reactivar
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -3087,22 +3215,20 @@ export default function App() {
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <ShieldCheck className="w-5 h-5 text-cyan-400" />
-                    Directorio de Usuarios y Permisos
+                    Usuarios y Permisos
                   </h2>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Permite a los administradores conceder o revocar accesos en tiempo real
                   </p>
                 </div>
-                {!isGeneralView && (
-                  <button
-                    type="button"
-                    onClick={handleOpenAddUser}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Nuevo Usuario</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleOpenAddUser}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Nuevo Usuario</span>
+                </button>
               </div>
 
               {usersLoading && (
@@ -3117,6 +3243,7 @@ export default function App() {
                     <tr>
                       <th className="px-4 py-3">Usuario</th>
                       <th className="px-4 py-3">Rol</th>
+                      <th className="px-4 py-3">Tienda asignada</th>
                       <th className="px-4 py-3">Permisos Activos</th>
                       <th className="px-4 py-3">Estado</th>
                       <th className="px-4 py-3">Último Acceso</th>
@@ -3126,7 +3253,7 @@ export default function App() {
                   <tbody className="divide-y divide-slate-700/60">
                     {usersList.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                        <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
                           <Users className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                           <p className="font-semibold text-slate-200 text-sm">No hay usuarios registrados</p>
                           <p className="text-xs text-slate-400 mt-1">
@@ -3181,6 +3308,20 @@ export default function App() {
                                  u.role === 'cajero' ? 'Cajero' : 'Personalizado'}
                               </span>
                             </td>
+                            <td className="px-4 py-3 text-slate-300">
+                              {u.storeId ? (
+                                <span>
+                                  {storeNameById.get(u.storeId) || u.storeId}
+                                  {stores.find((store) => store.id === u.storeId)?.status === 'archived' && (
+                                    <span className="ml-1 text-[10px] text-amber-400">(Archivada)</span>
+                                  )}
+                                </span>
+                              ) : u.role === 'cajero' ? (
+                                <span className="text-slate-500">Sin asignar</span>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-1">
                                 {perms.pos && (
@@ -3225,18 +3366,16 @@ export default function App() {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex items-center justify-end gap-1.5">
-                                {!isGeneralView && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenEditUser(u)}
-                                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
-                                    title="Editar usuario y permisos"
-                                  >
-                                    <Edit className="w-3 h-3" />
-                                    <span>Editar</span>
-                                  </button>
-                                )}
-                                {!isGeneralView && !isMainAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditUser(u)}
+                                  className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
+                                  title="Editar usuario y permisos"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                  <span>Editar</span>
+                                </button>
+                                {!isMainAdmin && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteUser(u)}
@@ -3266,6 +3405,148 @@ export default function App() {
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
         POSKlean • Gestión de inventarios y punto de venta integral. • 
       </footer>
+
+      {isStoreModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="store-modal-title"
+            className="my-8 w-full max-w-xl space-y-5 rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <h3 id="store-modal-title" className="flex items-center gap-2 text-base font-bold text-white">
+                <Store className="h-5 w-5 text-cyan-400" />
+                {editingStoreId ? 'Editar tienda' : 'Crear tienda'}
+              </h3>
+              <button
+                type="button"
+                onClick={handleCloseStoreModal}
+                disabled={isSavingStore}
+                aria-label="Cerrar"
+                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            {storeError && (
+              <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs text-red-300">
+                {storeError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStore} className="space-y-4">
+              <div>
+                <label htmlFor="store-name" className="mb-1 block text-xs font-medium text-slate-300">
+                  Tienda: <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  id="store-name"
+                  required
+                  autoFocus
+                  type="text"
+                  value={storeForm.name}
+                  onChange={(event) => setStoreForm((previous) => ({ ...previous, name: event.target.value }))}
+                  placeholder="Nombre de la tienda"
+                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="store-address" className="mb-1 block text-xs font-medium text-slate-300">
+                  Dirección
+                </label>
+                <input
+                  id="store-address"
+                  type="text"
+                  value={storeForm.address}
+                  onChange={(event) => setStoreForm((previous) => ({ ...previous, address: event.target.value }))}
+                  placeholder="Dirección de la tienda"
+                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium text-slate-300">Asignar cajeros</legend>
+                <p className="text-[11px] text-slate-400">
+                  La selección reemplaza la asignación actual de esta tienda. Un cajero seleccionado se moverá aquí desde otra tienda.
+                </p>
+                <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
+                  {usersLoading ? (
+                    <p className="p-2 text-xs text-slate-500">Cargando cajeros...</p>
+                  ) : usersList.filter((user) => user.role === 'cajero').length === 0 ? (
+                    <p className="p-2 text-xs text-slate-500">No hay usuarios con rol de cajero.</p>
+                  ) : usersList
+                    .filter((user) => user.role === 'cajero')
+                    .map((cashier) => {
+                      const assignedElsewhere = cashier.storeId && cashier.storeId !== editingStoreId;
+                      const assignedStoreName = assignedElsewhere
+                        ? storeNameById.get(cashier.storeId) || 'otra tienda'
+                        : '';
+                      return (
+                        <label
+                          key={cashier.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={storeForm.cashierIds.includes(cashier.id)}
+                            onChange={(event) => setStoreForm((previous) => ({
+                              ...previous,
+                              cashierIds: event.target.checked
+                                ? [...new Set([...previous.cashierIds, cashier.id])]
+                                : previous.cashierIds.filter((id) => id !== cashier.id),
+                            }))}
+                            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-400"
+                          />
+                          <span className="min-w-0 flex-1 truncate">
+                            {cashier.displayName || cashier.username || cashier.email || cashier.id}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-slate-500">
+                            {assignedElsewhere ? `Asignado a ${assignedStoreName}` : cashier.status || ''}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </fieldset>
+
+              <div>
+                <label htmlFor="store-phone" className="mb-1 block text-xs font-medium text-slate-300">
+                  Teléfono
+                </label>
+                <input
+                  id="store-phone"
+                  type="tel"
+                  value={storeForm.phone}
+                  onChange={(event) => setStoreForm((previous) => ({ ...previous, phone: event.target.value }))}
+                  placeholder="Teléfono de contacto"
+                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-slate-700 pt-4">
+                <button
+                  type="button"
+                  onClick={handleCloseStoreModal}
+                  disabled={isSavingStore}
+                  className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingStore || usersLoading}
+                  className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+                >
+                  {usersLoading ? 'Cargando cajeros...' : isSavingStore ? 'Guardando...' : editingStoreId ? 'Guardar cambios' : 'Crear tienda'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal for Add / Edit User */}
       {isUserModalOpen && (
@@ -3470,9 +3751,16 @@ export default function App() {
                     className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
                   >
                     <option value="">Selecciona una tienda</option>
-                    {stores.map((store) => (
+                    {activeStores.map((store) => (
                       <option key={store.id} value={store.id}>{store.name}</option>
                     ))}
+                    {userForm.storeId
+                      && !activeStores.some((store) => store.id === userForm.storeId)
+                      && stores.find((store) => store.id === userForm.storeId) && (
+                        <option value={userForm.storeId}>
+                          {stores.find((store) => store.id === userForm.storeId).name} (Archivada)
+                        </option>
+                      )}
                   </select>
                 </div>
               )}

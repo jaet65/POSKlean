@@ -5,6 +5,7 @@ import {
   getDocs, 
   onSnapshot, 
   query, 
+  runTransaction,
   setDoc, 
   updateDoc, 
   where 
@@ -409,7 +410,47 @@ export async function updateUser(userId, updates) {
   }
 
   cleanUpdates.updatedAt = new Date().toISOString();
-  await updateDoc(doc(db, 'users', userId), cleanUpdates);
+  const userRef = doc(db, 'users', userId);
+  if (Object.prototype.hasOwnProperty.call(cleanUpdates, 'storeId')) {
+    await runTransaction(db, async (transaction) => {
+      const userSnapshot = await transaction.get(userRef);
+      if (!userSnapshot.exists()) throw new Error('El usuario ya no existe.');
+      const previousStoreId = userSnapshot.data().storeId || '';
+      const nextStoreId = cleanUpdates.role === 'cajero' ? cleanUpdates.storeId || '' : '';
+      const storeIds = [...new Set([previousStoreId, nextStoreId].filter(Boolean))];
+      const storeSnapshots = await Promise.all(
+        storeIds.map((storeId) => transaction.get(doc(db, 'stores', storeId))),
+      );
+      const storesById = new Map(storeSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+
+      if (nextStoreId) {
+        const nextStoreSnapshot = storesById.get(nextStoreId);
+        if (!nextStoreSnapshot?.exists()) {
+          throw new Error('La tienda seleccionada ya no existe. Actualiza la lista e inténtalo de nuevo.');
+        }
+        if (nextStoreId !== previousStoreId && nextStoreSnapshot.data().status === 'archived') {
+          throw new Error('No se puede asignar un cajero a una tienda archivada.');
+        }
+      }
+
+      storeSnapshots.forEach((storeSnapshot) => {
+        if (!storeSnapshot.exists()) return;
+        const cashierIds = Array.isArray(storeSnapshot.data().cashierIds)
+          ? storeSnapshot.data().cashierIds.filter((id) => id !== userId)
+          : [];
+        if (storeSnapshot.id === nextStoreId) cashierIds.push(userId);
+        transaction.update(storeSnapshot.ref, {
+          cashierIds: [...new Set(cashierIds)],
+          updatedAt: cleanUpdates.updatedAt,
+        });
+      });
+
+      transaction.update(userRef, { ...cleanUpdates, storeId: nextStoreId });
+    });
+    return;
+  }
+
+  await updateDoc(userRef, cleanUpdates);
 }
 
 export async function deleteUser(userId, email) {
