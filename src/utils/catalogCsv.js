@@ -68,11 +68,17 @@ const parseNumber = (value) => {
 };
 
 // Devuelve { rows: [{ line, name, category, unit, price, minStock }], errors: [{ line, message }] }.
-// El proveedor (opcional) se enlaza por nombre con los proveedores activos.
+// El proveedor (opcional) se enlaza por nombre con los proveedores activos; si no existe,
+// la fila queda con newSupplierName y se devuelve en newSuppliers para confirmar su alta.
 export function parseCatalogCsv(rawText, suppliers = []) {
+  const keyOf = (value) => String(value || '').trim().toLocaleLowerCase('es-MX');
   const supplierByName = new Map(suppliers
     .filter((supplier) => supplier.status !== 'archived')
-    .map((supplier) => [String(supplier.name || '').trim().toLocaleLowerCase('es-MX'), supplier]));
+    .map((supplier) => [keyOf(supplier.name), supplier]));
+  const archivedNames = new Set(suppliers
+    .filter((supplier) => supplier.status === 'archived')
+    .map((supplier) => keyOf(supplier.name)));
+  const newSupplierNames = new Map();
   const text = String(rawText || '').replace(/^\uFEFF/, '');
   const firstLine = text.split(/\r?\n/, 1)[0] || '';
   const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
@@ -102,10 +108,12 @@ export function parseCatalogCsv(rawText, suppliers = []) {
     const price = hasPrice ? parseNumber(record.price) : suggestedSalePrice(cost);
     const minStock = record.minStock ? parseNumber(record.minStock) : 0;
     const key = (record.name || '').toLocaleLowerCase('es-MX');
-    const supplier = record.supplier ? supplierByName.get(record.supplier.toLocaleLowerCase('es-MX')) : null;
+    const supplierKey = keyOf(record.supplier);
+    const supplier = supplierKey ? supplierByName.get(supplierKey) : null;
     let message = '';
     if (!record.name || record.name.length > 120) message = 'Nombre vacío o mayor a 120 caracteres.';
-    else if (record.supplier && !supplier) message = `Proveedor "${record.supplier}" no existe o está archivado.`;
+    else if (supplierKey && !supplier && archivedNames.has(supplierKey)) message = `El proveedor "${record.supplier}" está archivado.`;
+    else if (supplierKey && !supplier && record.supplier.length > 120) message = 'Nombre de proveedor mayor a 120 caracteres.';
     else if (!record.category || record.category.length > 60) message = 'Categoría vacía o mayor a 60 caracteres.';
     else if ((record.unit || '').length > 10) message = 'La unidad admite máximo 10 caracteres.';
     else if (!Number.isFinite(cost) || cost <= 0 || Math.round(cost * 100) / 100 !== cost) message = 'Precio de compra inválido (mayor a 0, máximo dos decimales).';
@@ -117,6 +125,11 @@ export function parseCatalogCsv(rawText, suppliers = []) {
       return;
     }
     seen.add(key);
+    let newSupplierName = '';
+    if (supplierKey && !supplier) {
+      if (!newSupplierNames.has(supplierKey)) newSupplierNames.set(supplierKey, record.supplier);
+      newSupplierName = newSupplierNames.get(supplierKey);
+    }
     rows.push({
       line,
       name: record.name,
@@ -127,7 +140,8 @@ export function parseCatalogCsv(rawText, suppliers = []) {
       minStock,
       supplierId: supplier?.id || null,
       supplierName: supplier?.name || '',
+      newSupplierName,
     });
   });
-  return { rows, errors };
+  return { rows, errors, newSuppliers: [...newSupplierNames.values()] };
 }

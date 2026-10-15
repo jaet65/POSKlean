@@ -50,13 +50,14 @@ export function subscribeToSuppliers(onData, onError) {
 
 export async function addSupplier(data, user) {
   if (!db) throw new Error('Firestore no está inicializado.');
-  await addDoc(collection(db, 'suppliers'), {
+  const ref = await addDoc(collection(db, 'suppliers'), {
     ...cleanSupplierFields(data),
     status: 'active',
     createdBy: userInfo(user),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  return ref.id;
 }
 
 export async function updateSupplier(supplierId, data) {

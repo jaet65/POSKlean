@@ -11,7 +11,7 @@ import {
   updateCatalogProduct,
 } from '../services/catalogService';
 import { suggestedSalePrice } from '../services/purchaseService';
-import { subscribeToSuppliers } from '../services/supplierService';
+import { addSupplier, subscribeToSuppliers } from '../services/supplierService';
 
 const UNIT_OPTIONS = [
   ['L', 'L (Litro)'],
@@ -93,16 +93,31 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
       setError('El archivo CSV es demasiado grande (máximo 1 MB).');
       return;
     }
-    setCsvPreview(parseCatalogCsv(await file.text(), suppliers));
+    const parsed = parseCatalogCsv(await file.text(), suppliers);
+    setCsvPreview({ ...parsed, createSuppliers: true });
   };
 
   const confirmCsvImport = async () => {
     if (!csvPreview || busy) return;
     setBusy(true);
     try {
-      const { created, skipped } = await importCatalogProducts(csvPreview.rows, currentUser);
+      let rows = csvPreview.rows;
+      let createdSuppliers = 0;
+      if (csvPreview.newSuppliers.length > 0) {
+        const idByName = new Map();
+        if (csvPreview.createSuppliers) {
+          for (const name of csvPreview.newSuppliers) {
+            idByName.set(name, await addSupplier({ name }, currentUser));
+            createdSuppliers += 1;
+          }
+        }
+        rows = rows.map((row) => (row.newSupplierName
+          ? { ...row, supplierId: idByName.get(row.newSupplierName) || null }
+          : row));
+      }
+      const { created, skipped } = await importCatalogProducts(rows, currentUser);
       setCsvPreview(null);
-      setNotice(`Importación completada: ${created} creado(s)${skipped ? `, ${skipped} omitido(s) por ya existir` : ''}.`);
+      setNotice(`Importación completada: ${created} creado(s)${skipped ? `, ${skipped} omitido(s) por ya existir` : ''}${createdSuppliers ? `, ${createdSuppliers} proveedor(es) nuevo(s)` : ''}.`);
     } catch (importError) {
       setCsvPreview(null);
       setError(importError.message || 'No se pudo importar el catálogo.');
@@ -448,13 +463,39 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
           <div role="dialog" aria-modal="true" aria-label="Importar catálogo" className="w-full max-w-lg space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
             <div className="flex items-center justify-between border-b border-slate-700 pb-3">
               <h2 className="text-base font-bold text-white">Importar catálogo desde CSV</h2>
-              <button type="button" onClick={() => setCsvPreview(null)} aria-label="Cerrar" className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
+              <button type="button" disabled={busy} onClick={() => setCsvPreview(null)} aria-label="Cerrar" className="text-slate-400 hover:text-white disabled:opacity-40"><X className="h-4 w-4" /></button>
             </div>
             <p className="text-xs text-slate-300">
               <strong>{csvPreview.rows.length}</strong> producto(s) listos para importar
               {csvPreview.errors.length > 0 && <>, <strong className="text-rose-300">{csvPreview.errors.length}</strong> fila(s) con errores (se omiten)</>}.
               Los nombres que ya existen en el catálogo se omiten.
             </p>
+            {csvPreview.newSuppliers.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <p>
+                  Estos proveedores no existen: <strong>{csvPreview.newSuppliers.join(', ')}</strong>.
+                  ¿Deseas crearlos?
+                </p>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="csv-create-suppliers"
+                    checked={csvPreview.createSuppliers}
+                    onChange={() => setCsvPreview({ ...csvPreview, createSuppliers: true })}
+                  />
+                  Sí, crearlos y asociarlos a sus productos
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="csv-create-suppliers"
+                    checked={!csvPreview.createSuppliers}
+                    onChange={() => setCsvPreview({ ...csvPreview, createSuppliers: false })}
+                  />
+                  No, importar esos productos sin proveedor
+                </label>
+              </div>
+            )}
             {csvPreview.errors.length > 0 && (
               <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
                 {csvPreview.errors.map((item) => <li key={`${item.line}-${item.message}`}>Fila {item.line}: {item.message}</li>)}
@@ -463,13 +504,16 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             {csvPreview.rows.length > 0 && (
               <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
                 {csvPreview.rows.map((row) => (
-                  <li key={row.line}>{row.name} · {row.category} · {row.unit} · compra {formatCurrency(row.cost)} → venta {formatCurrency(row.price)} · mín. {row.minStock} · {row.supplierName || 'sin proveedor'}</li>
+                  <li key={row.line}>{row.name} · {row.category} · {row.unit} · compra {formatCurrency(row.cost)} → venta {formatCurrency(row.price)} · mín. {row.minStock} · {row.supplierName || (row.newSupplierName ? `${row.newSupplierName} (nuevo)` : 'sin proveedor')}</li>
                 ))}
               </ul>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setCsvPreview(null)} className="rounded-lg bg-slate-700 px-4 py-2 text-xs font-bold text-slate-100">Cancelar</button>
-              <button type="button" disabled={busy || csvPreview.rows.length === 0} onClick={confirmCsvImport} className="rounded-lg bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50">{busy ? 'Importando…' : 'Importar'}</button>
+              <button type="button" disabled={busy} onClick={() => setCsvPreview(null)} className="rounded-lg bg-slate-700 px-4 py-2 text-xs font-bold text-slate-100 disabled:opacity-50">Cancelar</button>
+              <button type="button" disabled={busy || csvPreview.rows.length === 0} onClick={confirmCsvImport} className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50">
+                {busy && <span aria-hidden="true" className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-950/30 border-t-slate-950" />}
+                {busy ? 'Importando…' : 'Importar'}
+              </button>
             </div>
           </div>
         </div>
