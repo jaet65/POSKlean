@@ -40,6 +40,10 @@ La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni t
 
 Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. Las reglas de Firestore limitan cada cajero a su tienda e impiden modificar o borrar ventas y movimientos, pero no pueden verificar por completo cifras como stock o totales enviadas por un cliente alterado; para eso se requiere un backend autenticado.
 
+### Archivado de tiendas
+
+Al archivar una tienda, la operación elimina en una transacción las asignaciones de sus cajeros tanto en los perfiles como en la tienda. Esos usuarios quedan sin tienda y no pueden operar en el POS hasta que se les asigne una tienda activa. Reactivar una tienda no restaura asignaciones anteriores; deben hacerse explícitamente desde la administración. Las reglas permiten consultar información histórica de tiendas archivadas a administradores, pero bloquean nuevas ventas y modificaciones de inventario en ellas.
+
 ## Impresión de tickets
 
 Desde el POS se puede imprimir el ticket después del cobro, o reimprimir cualquier ticket desde el historial. El selector permite ajustar el ancho a impresoras de 58 mm u 80 mm.

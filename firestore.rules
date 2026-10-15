@@ -73,6 +73,24 @@ service cloud.firestore {
       return get(profilePath()).data;
     }
 
+    function storePath(storeId) {
+      return /databases/$(database)/documents/stores/$(storeId);
+    }
+
+    function isActiveStore(storeId) {
+      return storeId is string
+        && storeId.size() > 0
+        && exists(storePath(storeId))
+        && get(storePath(storeId)).data.get('status', 'active') == 'active';
+    }
+
+    function isActiveStoreAfter(storeId) {
+      return storeId is string
+        && storeId.size() > 0
+        && existsAfter(storePath(storeId))
+        && getAfter(storePath(storeId)).data.get('status', 'active') == 'active';
+    }
+
     function isActiveStaff() {
       return isSuperAdmin() || (hasProfile() && profile().status == 'active');
     }
@@ -86,8 +104,13 @@ service cloud.firestore {
       return isAdmin()
         || (isActiveStaff()
           && storeId is string
+          && isActiveStore(storeId)
           && (profile().role != 'cajero'
             || (profile().get('storeId', '') != '' && profile().storeId == storeId)));
+    }
+
+    function canOperateStore(storeId) {
+      return canAccessStore(storeId) && isActiveStore(storeId);
     }
 
     function hasOnlyKeys(data, fields) {
@@ -140,6 +163,8 @@ service cloud.firestore {
         && validOptionalText(data, 'createdAt', 40)
         && validOptionalText(data, 'updatedAt', 40)
         && validOptionalText(data, 'lastLogin', 40)
+        && (data.get('storeId', '') == '' || data.get('storeId', '') == null
+          || isActiveStoreAfter(data.storeId))
         && data.get('authType', 'credentials') in ['credentials', 'google'];
     }
 
@@ -174,7 +199,8 @@ service cloud.firestore {
         && validText(data.get('phone', ''), 40)
         && data.get('status', 'active') in ['active', 'archived']
         && data.get('cashierIds', []) is list
-        && data.get('cashierIds', []).size() <= 200;
+        && data.get('cashierIds', []).size() <= 200
+        && (data.get('status', 'active') != 'archived' || data.get('cashierIds', []).size() == 0);
     }
 
     function hasValidProductFields(data) {
@@ -259,11 +285,11 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
 
-      allow create: if canAccessStore(request.resource.data.storeId)
+      allow create: if canOperateStore(request.resource.data.storeId)
         && isNewProduct(request.resource.data);
 
       allow update: if (request.resource.data.storeId == resource.data.get('storeId', null)
-        && canAccessStore(resource.data.get('storeId', null))
+        && canOperateStore(resource.data.get('storeId', null))
         && validNonNegative(request.resource.data.currentStock)
         && validNonNegative(request.resource.data.minStock)
         && (
@@ -277,19 +303,21 @@ service cloud.firestore {
             && hasValidProductFields(request.resource.data))
         ));
 
-      allow delete: if isAdmin() && resource.data.currentStock == 0;
+      allow delete: if isAdmin()
+        && isActiveStore(resource.data.get('storeId', null))
+        && resource.data.currentStock == 0;
     }
 
     match /sales/{saleId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
-      allow create: if canAccessStore(request.resource.data.storeId)
+      allow create: if canOperateStore(request.resource.data.storeId)
         && isValidSale(request.resource.data);
       allow update, delete: if false;
     }
 
     match /inventoryMovements/{movementId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
-      allow create: if canAccessStore(request.resource.data.storeId)
+      allow create: if canOperateStore(request.resource.data.storeId)
         && isValidMovement(request.resource.data)
         && (request.resource.data.type != 'audit' || isAdmin());
       allow update, delete: if false;

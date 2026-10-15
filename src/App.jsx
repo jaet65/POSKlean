@@ -202,6 +202,9 @@ export default function App() {
     || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
 
   const isAdmin = currentUser?.role === 'admin';
+  const isEditingArchivedStore = stores.some(
+    (store) => store.id === editingStoreId && store.status === 'archived',
+  );
   const canAccessPos = currentUser?.role === 'admin' || currentUser?.permissions?.pos;
   const canAccessInventory = currentUser?.role === 'admin' || currentUser?.permissions?.inventory;
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
@@ -970,11 +973,13 @@ export default function App() {
       name: store.name || '',
       address: store.address || '',
       phone: store.phone || '',
-      cashierIds: usersLoading && Array.isArray(store.cashierIds)
-        ? store.cashierIds
-        : usersList
-          .filter((user) => user.role === 'cajero' && user.storeId === store.id)
-          .map((user) => user.id),
+      cashierIds: store.status === 'archived'
+        ? []
+        : usersLoading && Array.isArray(store.cashierIds)
+          ? store.cashierIds
+          : usersList
+            .filter((user) => user.role === 'cajero' && user.storeId === store.id)
+            .map((user) => user.id),
     } : { name: '', address: '', phone: '', cashierIds: [] });
     setStoreError('');
     setIsStoreModalOpen(true);
@@ -993,8 +998,8 @@ export default function App() {
     const isArchiving = status === 'archived';
     const action = isArchiving ? 'archivar' : 'reactivar';
     const confirmation = isArchiving
-      ? `¿Archivar "${store.name}"? Se conservarán sus ventas e inventario históricos, pero dejará de aparecer para nuevas asignaciones.`
-      : `¿Reactivar "${store.name}"?`;
+      ? `¿Archivar "${store.name}"? Se conservarán sus ventas e inventario históricos, pero los cajeros asignados quedarán sin tienda y sin acceso al POS. Al reactivarla tendrás que asignarlos de nuevo.`
+      : `¿Reactivar "${store.name}"? Los cajeros no se reasignarán automáticamente; asígnalos desde la edición de la tienda.`;
     if (!window.confirm(confirmation)) return;
 
     setStoreError('');
@@ -3488,7 +3493,9 @@ export default function App() {
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-slate-300">Asignar cajeros</legend>
                 <p className="text-[11px] text-slate-400">
-                  La selección reemplaza la asignación actual de esta tienda. Un cajero seleccionado se moverá aquí desde otra tienda.
+                  {isEditingArchivedStore
+                    ? 'Reactiva esta tienda antes de asignarle cajeros.'
+                    : 'La selección reemplaza la asignación actual de esta tienda. Un cajero seleccionado se moverá aquí desde otra tienda.'}
                 </p>
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
                   {usersLoading ? (
@@ -3509,6 +3516,7 @@ export default function App() {
                         >
                           <input
                             type="checkbox"
+                            disabled={isEditingArchivedStore}
                             checked={storeForm.cashierIds.includes(cashier.id)}
                             onChange={(event) => setStoreForm((previous) => ({
                               ...previous,

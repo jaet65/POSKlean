@@ -1,9 +1,11 @@
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
+  query,
   runTransaction,
-  updateDoc,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -59,6 +61,9 @@ const saveStoreDetails = async ({ storeId = null, previousCashierIds = [], ...de
       const storeSnapshot = await transaction.get(storeRef);
       if (!storeSnapshot.exists()) throw new Error('La tienda ya no existe.');
       existingStore = storeSnapshot.data();
+      if (existingStore.status === 'archived' && selectedCashierIds.size > 0) {
+        throw new Error('No se pueden asignar cajeros a una tienda archivada. Reactívala primero.');
+      }
     }
 
     const assignedIds = new Set([
@@ -151,8 +156,53 @@ export async function updateStoreStatus(storeId, status) {
     throw new Error('El estado de la tienda no es válido.');
   }
 
-  await updateDoc(doc(db, 'stores', storeId), {
-    status,
-    updatedAt: new Date().toISOString(),
+  const storeRef = doc(db, 'stores', storeId);
+  const assignedCashiers = await getDocs(query(
+    collection(db, 'users'),
+    where('storeId', '==', storeId),
+  ));
+
+  await runTransaction(db, async (transaction) => {
+    const storeSnapshot = await transaction.get(storeRef);
+    if (!storeSnapshot.exists()) throw new Error('La tienda ya no existe.');
+    const storeData = storeSnapshot.data();
+    const storedCashierIds = storeData.cashierIds ?? [];
+    if (!Array.isArray(storedCashierIds)
+      || storedCashierIds.some((id) => typeof id !== 'string' || !id.trim() || id.includes('/'))) {
+      throw new Error('La lista de cajeros asignados a esta tienda no es válida. Corrige las asignaciones e inténtalo de nuevo.');
+    }
+    const needsAssignmentCleanup = status === 'archived'
+      || (storeData.status === 'archived' && status === 'active');
+    if (storeData.status === status
+      && (!needsAssignmentCleanup || (storedCashierIds.length === 0 && assignedCashiers.empty))) return;
+
+    const cashierIds = new Set([
+      ...storedCashierIds,
+      ...assignedCashiers.docs.map((cashierSnapshot) => cashierSnapshot.id),
+    ]);
+    if (cashierIds.size > 499) {
+      throw new Error('No se puede cambiar el estado de la tienda porque tiene demasiados cajeros asignados. Corrige las asignaciones e inténtalo de nuevo.');
+    }
+
+    const cashierSnapshots = await Promise.all(
+      [...cashierIds].map((cashierId) => transaction.get(doc(db, 'users', cashierId))),
+    );
+    const now = new Date().toISOString();
+
+    if (needsAssignmentCleanup) {
+      cashierSnapshots.forEach((cashierSnapshot) => {
+        if (!cashierSnapshot.exists()) return;
+        const cashier = cashierSnapshot.data();
+        if (cashier.role === 'cajero' && cashier.storeId === storeId) {
+          transaction.update(cashierSnapshot.ref, { storeId: '', updatedAt: now });
+        }
+      });
+    }
+
+    transaction.update(storeRef, {
+      status,
+      ...(needsAssignmentCleanup ? { cashierIds: [] } : {}),
+      updatedAt: now,
+    });
   });
 }
