@@ -38,6 +38,12 @@ La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni t
 
 `src/services/salesService.js` procesa cada cobro en una transacción: lee los productos, verifica que existan y que tengan stock suficiente, calcula el precio desde Firestore, descuenta `currentStock` y crea un ticket en `sales` como una sola operación atómica. Las ventas guardan cantidades y precios de cada artículo junto con el canal, el total y una marca de tiempo del servidor.
 
+### Turnos y cierres de caja
+
+Cada usuario puede mantener un solo turno abierto a la vez. Antes de vender debe abrir un turno en una tienda activa e indicar el fondo inicial. Cada venta registra por separado el canal comercial y un único método de pago: efectivo, tarjeta o transferencia. El cierre suma las ventas de ese turno, calcula el efectivo esperado como fondo inicial más ventas en efectivo, guarda el efectivo contado y la diferencia, y permite imprimir el cierre. Las reglas exigen que la venta apunte al turno abierto de su cajero y que la caja y el turno cambien de estado juntos.
+
+El cálculo actual no contempla retiros, entradas adicionales de efectivo, devoluciones ni pagos divididos; cualquier diferencia debe registrarse como diferencia de cierre. Las cifras se calculan en el cliente y las reglas validan el flujo y los tipos, pero no reemplazan un backend confiable para auditar importes frente a clientes manipulados.
+
 Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. Las reglas de Firestore limitan cada cajero a su tienda e impiden modificar o borrar ventas y movimientos, pero no pueden verificar por completo cifras como stock o totales enviadas por un cliente alterado; para eso se requiere un backend autenticado.
 
 ### Archivado de tiendas

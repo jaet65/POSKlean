@@ -16,6 +16,9 @@ import {
   Truck, 
   MessageSquare, 
   DollarSign,
+  Banknote,
+  CreditCard,
+  ArrowLeftRight,
   Droplet,
   Layers,
   Printer,
@@ -31,6 +34,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
+import { useCashShift } from './hooks/useCashShift';
 import {
   addProduct as saveNewProduct,
   deleteProduct as removeProduct,
@@ -39,6 +43,7 @@ import {
   completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
 import { createSale } from './services/salesService';
+import { closeCashShift, openCashShift } from './services/cashShiftService';
 import {
   DEFAULT_PERMISSIONS,
   MIN_PASSWORD_LENGTH,
@@ -130,9 +135,15 @@ export default function App() {
   const [cart, setCart] = useState([]);
   const [cartQuantityDrafts, setCartQuantityDrafts] = useState({});
   const [selectedChannel, setSelectedChannel] = useState('Mostrador');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [showCheckoutSuccess, setShowCheckoutSuccess] = useState(false);
+  const [cashShiftModal, setCashShiftModal] = useState(null);
+  const [openingCashDraft, setOpeningCashDraft] = useState('0');
+  const [countedCashDraft, setCountedCashDraft] = useState('');
+  const [cashShiftActionError, setCashShiftActionError] = useState('');
+  const [isSavingCashShift, setIsSavingCashShift] = useState(false);
 
   // Inventory Modal State
   const [isRestockOpen, setIsRestockOpen] = useState(false);
@@ -213,6 +224,13 @@ export default function App() {
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const isGeneralView = isStoreManager && !selectedStoreId;
   const canUsePos = canAccessPos && !isGeneralView;
+  const { shift: cashShift, loading: cashShiftLoading, error: cashShiftError } = useCashShift(
+    activeStoreId,
+    currentUserId,
+    Boolean(canUsePos && activeStoreId && currentUserId),
+  );
+  const isCashShiftOpen = cashShift?.status === 'open' && cashShift.storeId === activeStoreId;
+  const cashShiftStoreMismatch = cashShift?.status === 'open' && !isCashShiftOpen;
   const [usersLoadedForUserId, setUsersLoadedForUserId] = useState(null);
   const usersLoading = Boolean(canAccessUsers && usersLoadedForUserId !== (currentUserId || 'unknown'));
 
@@ -322,6 +340,15 @@ export default function App() {
       (sale) => sale.createdBy?.userId === currentUserId,
     );
   }, [salesToday, isCajero, currentUserId]);
+
+  const currentShiftPaymentTotals = useMemo(() => ({
+    cash: (cashShift?.paymentTotalsCents?.cash || 0) / 100,
+    card: (cashShift?.paymentTotalsCents?.card || 0) / 100,
+    transfer: (cashShift?.paymentTotalsCents?.transfer || 0) / 100,
+  }), [cashShift]);
+  const currentShiftExpectedCash = Number(
+    (((cashShift?.openingCashCents || 0) / 100) + currentShiftPaymentTotals.cash).toFixed(2),
+  );
 
   const cashClosureSummary = useMemo(() => {
     const channels = new Map();
@@ -583,14 +610,27 @@ export default function App() {
 
   const cartVolume = useMemo(() => summarizeVolume(cart), [cart]);
 
-  const handleCompleteSale = async () => {
+  const handleCompleteSale = async (paymentMethod) => {
     if (isGeneralView || cart.length === 0 || isSavingSale) return;
+    if (!isCashShiftOpen) {
+      setShowPaymentModal(false);
+      setCashShiftActionError('Abre un turno de caja antes de registrar ventas.');
+      return;
+    }
     setActionError('');
     setIsSavingSale(true);
     try {
-      const sale = await createSale({ cart, channel: selectedChannel, user: currentUser, storeId: activeStoreId });
+      const sale = await createSale({
+        cart,
+        channel: selectedChannel,
+        paymentMethod,
+        shiftId: cashShift.id,
+        user: currentUser,
+        storeId: activeStoreId,
+      });
       setCart([]);
       setCartQuantityDrafts({});
+      setShowPaymentModal(false);
       setLastCompletedSale(sale);
       setShowCheckoutSuccess(true);
       setTimeout(() => setShowCheckoutSuccess(false), 3000);
@@ -598,6 +638,58 @@ export default function App() {
       setActionError(error.message || 'No se pudo registrar la venta.');
     } finally {
       setIsSavingSale(false);
+    }
+  };
+
+  const handleOpenCashShift = async (event) => {
+    event.preventDefault();
+    if (isSavingCashShift || !activeStoreId || cashShift?.status === 'open') return;
+    setCashShiftActionError('');
+    setIsSavingCashShift(true);
+    try {
+      await openCashShift({
+        storeId: activeStoreId,
+        user: currentUser,
+        openingCash: Number(openingCashDraft),
+      });
+      setCashShiftModal(null);
+      setOpeningCashDraft('0');
+    } catch (error) {
+      setCashShiftActionError(error.message || 'No se pudo abrir el turno.');
+    } finally {
+      setIsSavingCashShift(false);
+    }
+  };
+
+  const handleCloseCashShift = async (event) => {
+    event.preventDefault();
+    if (isSavingCashShift || !activeStoreId || !isCashShiftOpen) return;
+    if (cart.length > 0) {
+      setCashShiftActionError('Vacía el carrito antes de cerrar el turno.');
+      return;
+    }
+    setCashShiftActionError('');
+    setIsSavingCashShift(true);
+    try {
+      const closedShift = await closeCashShift({
+        shiftId: cashShift.id,
+        storeId: activeStoreId,
+        user: currentUser,
+        countedCash: Number(countedCashDraft),
+      });
+      setCashShiftModal(null);
+      setCountedCashDraft('');
+      setTicketToPrint({
+        type: 'cashShift',
+        data: {
+          ...closedShift,
+          storeName: storeNameById.get(activeStoreId) || activeStoreId,
+        },
+      });
+    } catch (error) {
+      setCashShiftActionError(error.message || 'No se pudo cerrar el turno.');
+    } finally {
+      setIsSavingCashShift(false);
     }
   };
 
@@ -998,7 +1090,7 @@ export default function App() {
     const isArchiving = status === 'archived';
     const action = isArchiving ? 'archivar' : 'reactivar';
     const confirmation = isArchiving
-      ? `¿Archivar "${store.name}"? Se conservarán sus ventas e inventario históricos, pero los cajeros asignados quedarán sin tienda y sin acceso al POS. Al reactivarla tendrás que asignarlos de nuevo.`
+      ? `¿Archivar "${store.name}"? Primero deben cerrarse todos los turnos abiertos. Después, los cajeros asignados quedarán sin tienda y sin acceso al POS; al reactivarla tendrás que asignarlos de nuevo.`
       : `¿Reactivar "${store.name}"? Los cajeros no se reasignarán automáticamente; asígnalos desde la edición de la tienda.`;
     if (!window.confirm(confirmation)) return;
 
@@ -1019,6 +1111,8 @@ export default function App() {
   const handleStoreChange = (storeId) => {
     setCart([]);
     setCartQuantityDrafts({});
+    setCashShiftModal(null);
+    setCashShiftActionError('');
     setIsRestockOpen(false);
     setIsAddProductOpen(false);
     setIsInventoryAuditOpen(false);
@@ -1385,7 +1479,7 @@ export default function App() {
 
         {/* Global Quick Metrics & User Info */}
         <div className="flex items-center gap-3 ml-4 mr-auto">
-          <div className={`flex items-center gap-2 border px-3 py-1.5 rounded-lg text-xs font-semibold ${
+          <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${
             lowStockCount > 0 
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse' 
               : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
@@ -1395,7 +1489,7 @@ export default function App() {
           </div>
 
           {isStoreManager && (
-            <label className="flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl text-xs">
+            <label className="flex h-11 items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl text-xs">
               <Store className="w-4 h-4 text-cyan-400" />
               <select
                 aria-label="Tienda activa"
@@ -1415,13 +1509,67 @@ export default function App() {
           {currentUser.role === 'cajero' && (
             <div
               aria-label={`Tienda activa: ${storeNameById.get(activeStoreId) || activeStoreId}`}
-              className="flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 py-1.5 text-xs"
+              className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs"
             >
               <Store className="h-4 w-4 shrink-0 text-cyan-400" />
               <span className="text-slate-400">Tienda activa:</span>
               <strong className="max-w-40 truncate text-slate-200">
                 {storeNameById.get(activeStoreId) || activeStoreId}
               </strong>
+            </div>
+          )}
+
+          {activeStoreId && (
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs">
+              <DollarSign className="h-4 w-4 shrink-0 text-cyan-400" />
+              {cashShiftLoading ? (
+                <span className="text-slate-400">Consultando turno...</span>
+              ) : cashShiftError ? (
+                <span role="alert" className="max-w-56 truncate text-rose-300" title={cashShiftError}>{cashShiftError}</span>
+              ) : cashShiftStoreMismatch ? (
+                <span
+                  className="max-w-56 truncate text-amber-300"
+                  title="Cierra ese turno en su tienda antes de cambiar."
+                >
+                  Turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}
+                </span>
+              ) : isCashShiftOpen ? (
+                <>
+                  <span className="font-semibold text-emerald-300">Turno abierto</span>
+                  <span className="hidden text-slate-400 xl:inline">
+                    Fondo {formatCurrency(cashShift.openingCashCents / 100)} · Esperado {formatCurrency(currentShiftExpectedCash)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCountedCashDraft('');
+                      setCashShiftActionError('');
+                      setCashShiftModal('close');
+                    }}
+                    disabled={cart.length > 0 || isSavingCashShift}
+                    title={cart.length > 0 ? 'Vacía el carrito antes de cerrar el turno.' : undefined}
+                    className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cerrar caja
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-amber-300">Sin turno abierto</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpeningCashDraft('0');
+                      setCashShiftActionError('');
+                      setCashShiftModal('open');
+                    }}
+                    disabled={isSavingCashShift}
+                    className="rounded-lg bg-cyan-500 px-2 py-1 font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Abrir turno
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -1448,7 +1596,7 @@ export default function App() {
           )}
 
           {/* User Profile Badge */}
-          <div className="absolute top-3 right-4 z-10 flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 py-1.5 rounded-xl">
+          <div className="absolute top-3 right-4 z-10 flex h-11 items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl">
             {currentUser.photoURL ? (
               <img
                 src={currentUser.photoURL}
@@ -1573,7 +1721,45 @@ export default function App() {
 
       <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
         {/* TAB 1: PUNTO DE VENTA (POS) */}
-        {visibleTab === 'pos' && canUsePos && (
+        {visibleTab === 'pos' && canUsePos && activeStoreId && !isCashShiftOpen && (
+          <section className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-8 text-center shadow-md">
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-400">
+              <DollarSign className="h-8 w-8" />
+            </div>
+            {cashShiftLoading ? (
+              <p className="text-sm text-slate-400">Consultando turno...</p>
+            ) : cashShiftError ? (
+              <p role="alert" className="text-sm text-rose-300">{cashShiftError}</p>
+            ) : cashShiftStoreMismatch ? (
+              <>
+                <h2 className="text-lg font-bold text-white">Turno abierto en otra tienda</h2>
+                <p className="text-sm text-amber-300">
+                  Tienes un turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}. Vuelve a esa tienda y ciérralo antes de cambiar.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-white">Abre un turno para vender</h2>
+                <p className="text-sm text-slate-400">
+                  Registra el fondo de caja inicial para habilitar el punto de venta.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpeningCashDraft('0');
+                    setCashShiftActionError('');
+                    setCashShiftModal('open');
+                  }}
+                  disabled={isSavingCashShift}
+                  className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Abrir turno
+                </button>
+              </>
+            )}
+          </section>
+        )}
+        {visibleTab === 'pos' && canUsePos && !(activeStoreId && !isCashShiftOpen) && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
             
             {/* Catalog & Quick Add (Left Column - 7/12) */}
@@ -1619,7 +1805,7 @@ export default function App() {
                   return (
                     <button
                       key={prod.id}
-                      disabled={isGeneralView || isOutOfStock}
+                      disabled={isGeneralView || isOutOfStock || !isCashShiftOpen}
                       onClick={() => handleSelectProductToCart(prod)}
                       className={`text-left p-3.5 rounded-2xl border transition-all flex flex-col justify-between relative group ${
                         isSelected 
@@ -1659,6 +1845,12 @@ export default function App() {
 
             {/* Cart Panel (Right Column - 5/12) */}
             <div className="lg:col-span-5 flex flex-col gap-4">
+
+              {cashShiftActionError && !cashShiftModal && (
+                <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">
+                  {cashShiftActionError}
+                </p>
+              )}
 
               {/* Shopping Cart Summary */}
               <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex-1 flex flex-col justify-between shadow-md">
@@ -1746,7 +1938,7 @@ export default function App() {
 
                 {/* Checkout Summary Footer */}
                 <div className="pt-4 border-t border-slate-700 mt-4">
-                  <div className="space-y-1.5 mb-4 text-xs">
+                <div className="space-y-1.5 mb-4 text-xs">
                     <div className="flex justify-between text-slate-400">
                       <span>Total Volumen:</span>
                       <span className="font-mono text-slate-200">
@@ -1780,10 +1972,13 @@ export default function App() {
                   )}
 
                   <button
-                    disabled={isGeneralView || cart.length === 0 || isSavingSale || loading}
-                    onClick={handleCompleteSale}
+                    disabled={isGeneralView || cart.length === 0 || isSavingSale || loading || !isCashShiftOpen}
+                    onClick={() => {
+                      setActionError('');
+                      setShowPaymentModal(true);
+                    }}
                     className={`w-full py-3 rounded-xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${
-                      !isGeneralView && cart.length > 0 && !isSavingSale && !loading
+                      !isGeneralView && cart.length > 0 && !isSavingSale && !loading && isCashShiftOpen
                         ? 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-cyan-500/25' 
                         : 'bg-slate-700 text-slate-500 cursor-not-allowed'
                     }`}
@@ -2850,6 +3045,59 @@ export default function App() {
               </div>
             )}
 
+            {cashShift?.status === 'closed' && cashShift.storeId === activeStoreId && (
+              <section className="rounded-2xl border border-slate-700 bg-slate-800 p-4 shadow-md">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-white">Último cierre de caja</h2>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {cashShift.closedAt?.toDate
+                        ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+                        : 'Fecha no disponible'}
+                      {' · Turno '}{cashShift.id.slice(0, 8).toUpperCase()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTicketToPrint({
+                      type: 'cashShift',
+                      data: {
+                        ...cashShift,
+                        storeName: storeNameById.get(activeStoreId) || activeStoreId,
+                        timestamp: cashShift.closedAt?.toDate
+                          ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+                          : 'Fecha no disponible',
+                      },
+                    })}
+                    className="flex items-center gap-2 rounded-xl border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Imprimir cierre
+                  </button>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div>
+                    <p className="text-[11px] text-slate-400">Efectivo esperado</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.expectedCashCents / 100)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-400">Efectivo contado</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.countedCashCents / 100)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-400">Diferencia</p>
+                    <p className={`mt-1 font-mono text-sm font-semibold ${cashShift.cashDifferenceCents === 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      {formatCurrency(cashShift.cashDifferenceCents / 100)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-400">Tickets</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-white">{cashShift.saleCount}</p>
+                  </div>
+                </div>
+              </section>
+            )}
+
             {/* Sales Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
@@ -2895,7 +3143,7 @@ export default function App() {
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <DollarSign className="w-5 h-5 text-cyan-400" />
-                    Cierre de caja del día
+                    Resumen de ventas del día
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
                     {new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'long' })}
@@ -2917,7 +3165,7 @@ export default function App() {
                   className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Printer className="w-4 h-4" />
-                  Imprimir cierre
+                  Imprimir resumen
                 </button>
               </div>
 
@@ -2991,6 +3239,7 @@ export default function App() {
                       <th className="px-4 py-3">Folio</th>
                       <th className="px-4 py-3">Hora / Fecha</th>
                       <th className="px-4 py-3">Canal</th>
+                      <th className="px-4 py-3">Pago</th>
                       <th className="px-4 py-3">Vendedor</th>
                       <th className="px-4 py-3">Detalle</th>
                       <th className="px-4 py-3">Cantidad</th>
@@ -3010,6 +3259,12 @@ export default function App() {
                           }`}>
                             {sale.channel}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">
+                          {sale.paymentMethod === 'cash' ? 'Efectivo'
+                            : sale.paymentMethod === 'card' ? 'Tarjeta'
+                              : sale.paymentMethod === 'transfer' ? 'Transferencia'
+                                : 'No registrado'}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
@@ -3422,6 +3677,213 @@ export default function App() {
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
         POSKlean • Gestión de inventarios y punto de venta integral. • 
       </footer>
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payment-modal-title"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div>
+                <h2 id="payment-modal-title" className="text-base font-bold text-white">¿Cómo pagó el cliente?</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  Total a cobrar: <strong className="font-mono text-cyan-400">{formatCurrency(cartTotal)} MXN</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                disabled={isSavingSale}
+                aria-label="Cerrar"
+                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'cash', label: 'Efectivo', icon: Banknote, color: 'text-emerald-400' },
+                { id: 'card', label: 'Tarjeta', icon: CreditCard, color: 'text-sky-400' },
+                { id: 'transfer', label: 'Transferencia', icon: ArrowLeftRight, color: 'text-violet-400' },
+              ].map((method) => {
+                const Icon = method.icon;
+                return (
+                  <button
+                    key={method.id}
+                    type="button"
+                    onClick={() => handleCompleteSale(method.id)}
+                    disabled={isSavingSale}
+                    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Icon className={`h-6 w-6 ${method.color}`} />
+                    <span>{method.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {isSavingSale && <p className="text-center text-xs text-slate-400">Procesando...</p>}
+            {actionError && (
+              <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">
+                {actionError}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {cashShiftModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cash-shift-modal-title"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div>
+                <h2 id="cash-shift-modal-title" className="text-base font-bold text-white">
+                  {cashShiftModal === 'open' ? 'Abrir turno de caja' : 'Cerrar turno y hacer cierre'}
+                </h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  {storeNameById.get(activeStoreId) || 'Tienda seleccionada'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCashShiftModal(null)}
+                disabled={isSavingCashShift}
+                aria-label="Cerrar"
+                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            {cashShiftModal === 'open' ? (
+              <form onSubmit={handleOpenCashShift} className="space-y-4">
+                <p className="text-xs text-slate-300">
+                  Captura el efectivo que queda en caja al iniciar. Las ventas de turnos anteriores no se incluirán.
+                </p>
+                <div>
+                  <label htmlFor="opening-cash" className="mb-1 block text-xs font-medium text-slate-300">
+                    Fondo inicial (MXN)
+                  </label>
+                  <input
+                    id="opening-cash"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    autoFocus
+                    value={openingCashDraft}
+                    onChange={(event) => setOpeningCashDraft(event.target.value)}
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+                {cashShiftActionError && (
+                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                    {cashShiftActionError}
+                  </p>
+                )}
+                <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setCashShiftModal(null)}
+                    disabled={isSavingCashShift}
+                    className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingCashShift}
+                    className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+                  >
+                    {isSavingCashShift ? 'Abriendo...' : 'Abrir turno'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleCloseCashShift} className="space-y-4">
+                <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs">
+                  <div className="flex justify-between gap-3 text-slate-300">
+                    <span>Fondo inicial</span>
+                    <strong className="font-mono">{formatCurrency((cashShift?.openingCashCents || 0) / 100)}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3 text-slate-300">
+                    <span>Ventas en efectivo ({cashShift?.saleCount || 0} tickets totales)</span>
+                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.cash)}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3 text-slate-300">
+                    <span>Ventas con tarjeta</span>
+                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.card)}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3 text-slate-300">
+                    <span>Ventas por transferencia</span>
+                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.transfer)}</strong>
+                  </div>
+                  <div className="flex justify-between gap-3 border-t border-slate-700 pt-2 font-semibold text-white">
+                    <span>Efectivo esperado</span>
+                    <strong className="font-mono text-cyan-300">{formatCurrency(currentShiftExpectedCash)}</strong>
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="counted-cash" className="mb-1 block text-xs font-medium text-slate-300">
+                    Efectivo contado al cierre (MXN)
+                  </label>
+                  <input
+                    id="counted-cash"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    autoFocus
+                    value={countedCashDraft}
+                    onChange={(event) => setCountedCashDraft(event.target.value)}
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+                {countedCashDraft !== '' && Number.isFinite(Number(countedCashDraft)) && (
+                  <p className="text-xs text-slate-300">
+                    Diferencia estimada:{' '}
+                    <strong className={Number(countedCashDraft) - currentShiftExpectedCash === 0
+                      ? 'text-emerald-300'
+                      : 'text-amber-300'}
+                    >
+                      {formatCurrency(Number(countedCashDraft) - currentShiftExpectedCash)}
+                    </strong>
+                  </p>
+                )}
+                {cashShiftActionError && (
+                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                    {cashShiftActionError}
+                  </p>
+                )}
+                <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setCashShiftModal(null)}
+                    disabled={isSavingCashShift}
+                    className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingCashShift}
+                    className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
+                  >
+                    {isSavingCashShift ? 'Cerrando...' : 'Guardar cierre'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {isStoreModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">

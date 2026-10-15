@@ -18,15 +18,26 @@ rules_version = '2';
 //   storeId?: string, createdAt/updatedAt/lastLogin?: ISO string
 //
 // Collection: stores           Document ID: auto
-//   name, address?, phone?, status ('active'|'archived'), cashierIds: list<string>, ...
+//   name, address?, phone?, status ('active'|'archived'), cashierIds: list<string>;
+//   openCashShiftCount: int (defaults to 0 and must be 0 when archived)
 //
 // Collection: products         Document ID: auto
 //   name, category, unit, color: string; currentStock, minStock, price, cost: number;
 //   storeId: string; createdBy: map; createdAt: timestamp; audit/restock metadata
 //
 // Collection: sales            Document ID: auto (immutable once created)
-//   ticketId, channel: string; items: list; total, liters: number;
-//   createdBy: map; storeId: string; timestamp: timestamp
+//   ticketId, channel, paymentMethod, shiftId, cashierId: string; items: list;
+//   total: number; totalCents, liters: number; createdBy: map;
+//   storeId: string; timestamp: timestamp
+//
+// Collection: cashShifts        Document ID: auto
+//   shiftId, cashierId, storeId, status: string; openingCashCents: int; openedBy: map;
+//   openedAt: timestamp; paymentTotalsCents and saleCount update atomically with
+//   each sale; countedCashCents, expectedCashCents and cashDifferenceCents are
+//   written atomically on closure and never change afterwards
+//
+// Collection: cashRegisters     Document ID: cashier UID
+//   cashierId, storeId, shiftId, status: string; updatedAt: timestamp
 //
 // Collection: inventoryMovements   Document ID: auto (immutable once created)
 //   type, productId, productName, unit: string; amount, previousStock, newStock: number;
@@ -77,6 +88,63 @@ service cloud.firestore {
       return /databases/$(database)/documents/stores/$(storeId);
     }
 
+    function cashShiftPath(shiftId) {
+      return /databases/$(database)/documents/cashShifts/$(shiftId);
+    }
+
+    function cashRegisterPath(cashierId) {
+      return /databases/$(database)/documents/cashRegisters/$(cashierId);
+    }
+
+    function salePath(saleId) {
+      return /databases/$(database)/documents/sales/$(saleId);
+    }
+
+    function storeOpenShiftCountIncreased(storeId) {
+      let before = get(storePath(storeId)).data.get('openCashShiftCount', 0);
+      return getAfter(storePath(storeId)).data.get('openCashShiftCount', 0) == before + 1;
+    }
+
+    function storeOpenShiftCountDecreased(storeId) {
+      let before = get(storePath(storeId)).data.get('openCashShiftCount', 0);
+      return before > 0
+        && getAfter(storePath(storeId)).data.get('openCashShiftCount', 0) == before - 1;
+    }
+
+    // Counter changes are checked against the register and shift written in the same batch.
+    function isCashShiftStoreCounterIncrease(storeId) {
+      let registerAfter = getAfter(cashRegisterPath(request.auth.uid)).data;
+      let shiftAfter = getAfter(cashShiftPath(registerAfter.shiftId)).data;
+      return isAuthenticated()
+        && changedKeys().hasOnly(['openCashShiftCount'])
+        && resource.data.get('status', 'active') == 'active'
+        && request.resource.data.openCashShiftCount is int
+        && request.resource.data.openCashShiftCount <= 100000
+        && request.resource.data.openCashShiftCount
+          == resource.data.get('openCashShiftCount', 0) + 1
+        && registerAfter.status == 'open'
+        && registerAfter.storeId == storeId
+        && shiftAfter.status == 'open'
+        && shiftAfter.storeId == storeId
+        && shiftAfter.cashierId == request.auth.uid;
+    }
+
+    function isCashShiftStoreCounterDecrease(storeId) {
+      let registerAfter = getAfter(cashRegisterPath(request.auth.uid)).data;
+      let shiftAfter = getAfter(cashShiftPath(registerAfter.shiftId)).data;
+      return isAuthenticated()
+        && changedKeys().hasOnly(['openCashShiftCount'])
+        && resource.data.get('openCashShiftCount', 0) > 0
+        && request.resource.data.openCashShiftCount is int
+        && request.resource.data.openCashShiftCount
+          == resource.data.get('openCashShiftCount', 0) - 1
+        && registerAfter.status == 'closed'
+        && registerAfter.storeId == storeId
+        && shiftAfter.status == 'closed'
+        && shiftAfter.storeId == storeId
+        && shiftAfter.cashierId == request.auth.uid;
+    }
+
     function isActiveStore(storeId) {
       return storeId is string
         && storeId.size() > 0
@@ -113,6 +181,11 @@ service cloud.firestore {
       return canAccessStore(storeId) && isActiveStore(storeId);
     }
 
+    function canOperatePOS() {
+      return isAdmin()
+        || (isActiveStaff() && profile().get('permissions', {}).get('pos', false) == true);
+    }
+
     function hasOnlyKeys(data, fields) {
       return data.keys().hasOnly(fields);
     }
@@ -137,6 +210,76 @@ service cloud.firestore {
     // The author recorded in a document must be the signed-in user.
     function isOwnAuthorship(createdBy) {
       return createdBy is map && createdBy.get('userId', null) == request.auth.uid;
+    }
+
+    // A missing document makes getAfter()/get() fail, which denies the request.
+    function isOpenShiftLinkedToRegister(data) {
+      let shiftAfter = getAfter(cashShiftPath(data.shiftId)).data;
+      let registerAfter = getAfter(cashRegisterPath(data.cashierId)).data;
+      return data.cashierId == request.auth.uid
+        && shiftAfter.status == 'open'
+        && shiftAfter.cashierId == data.cashierId
+        && shiftAfter.storeId == data.storeId
+        && registerAfter.status == 'open'
+        && registerAfter.shiftId == data.shiftId
+        && registerAfter.storeId == data.storeId
+        && storeOpenShiftCountIncreased(data.storeId);
+    }
+
+    function isClosedShiftLinkedToRegister(data) {
+      let shiftAfter = getAfter(cashShiftPath(data.shiftId)).data;
+      return data.cashierId == request.auth.uid
+        && shiftAfter.status == 'closed'
+        && shiftAfter.cashierId == data.cashierId
+        && shiftAfter.storeId == data.storeId
+        && storeOpenShiftCountDecreased(data.storeId);
+    }
+
+    function isSaleForOpenCashShift(data) {
+      let shift = get(cashShiftPath(data.shiftId)).data;
+      let register = get(cashRegisterPath(request.auth.uid)).data;
+      return data.cashierId == request.auth.uid
+        && data.shiftId is string
+        && data.shiftId.size() > 0
+        && shift.status == 'open'
+        && shift.cashierId == request.auth.uid
+        && shift.storeId == data.storeId
+        && register.status == 'open'
+        && register.shiftId == data.shiftId
+        && register.storeId == data.storeId;
+    }
+
+    function isValidCashShiftSaleUpdate(oldData, newData, shiftId) {
+      let sale = getAfter(salePath(newData.lastSaleId)).data;
+      let oldTotals = oldData.paymentTotalsCents;
+      let newTotals = newData.paymentTotalsCents;
+      return newData.status == 'open'
+        && changedKeys().hasOnly(['paymentTotalsCents', 'saleCount', 'lastSaleId'])
+        && newTotals.keys().hasOnly(['cash', 'card', 'transfer'])
+        && newData.lastSaleId is string && newData.lastSaleId.size() > 0
+        && newData.lastSaleId != oldData.get('lastSaleId', '')
+        && !exists(salePath(newData.lastSaleId))
+        && sale.shiftId == shiftId
+        && sale.cashierId == request.auth.uid
+        && sale.storeId == oldData.storeId
+        && sale.createdBy.get('userId', null) == request.auth.uid
+        && sale.totalCents is int
+        && newData.saleCount == oldData.saleCount + 1
+        && newData.saleCount <= 100000
+        && (
+          (sale.paymentMethod == 'cash'
+            && newTotals.cash == oldTotals.cash + sale.totalCents
+            && newTotals.card == oldTotals.card
+            && newTotals.transfer == oldTotals.transfer)
+          || (sale.paymentMethod == 'card'
+            && newTotals.card == oldTotals.card + sale.totalCents
+            && newTotals.cash == oldTotals.cash
+            && newTotals.transfer == oldTotals.transfer)
+          || (sale.paymentMethod == 'transfer'
+            && newTotals.transfer == oldTotals.transfer + sale.totalCents
+            && newTotals.cash == oldTotals.cash
+            && newTotals.card == oldTotals.card)
+        );
     }
 
     // ===============================================================
@@ -200,6 +343,11 @@ service cloud.firestore {
         && data.get('status', 'active') in ['active', 'archived']
         && data.get('cashierIds', []) is list
         && data.get('cashierIds', []).size() <= 200
+        && data.get('openCashShiftCount', 0) is int
+        && data.get('openCashShiftCount', 0) >= 0
+        && data.get('openCashShiftCount', 0) <= 100000
+        && (data.get('status', 'active') != 'archived'
+          || data.get('openCashShiftCount', 0) == 0)
         && (data.get('status', 'active') != 'archived' || data.get('cashierIds', []).size() == 0);
     }
 
@@ -227,16 +375,74 @@ service cloud.firestore {
 
     function isValidSale(data) {
       return hasOnlyKeys(data, ['ticketId', 'channel', 'items', 'total', 'liters',
-          'createdBy', 'storeId', 'timestamp'])
+          'createdBy', 'storeId', 'timestamp', 'paymentMethod', 'shiftId', 'cashierId',
+          'totalCents'])
         && data.keys().hasAll(['ticketId', 'channel', 'items', 'total', 'liters',
-          'createdBy', 'storeId', 'timestamp'])
+          'createdBy', 'storeId', 'timestamp', 'paymentMethod', 'shiftId', 'cashierId',
+          'totalCents'])
         && validText(data.ticketId, 40)
         && validText(data.channel, 60) && data.channel.size() > 0
+        && data.cashierId == request.auth.uid
+        && data.paymentMethod in ['cash', 'card', 'transfer']
+        && isSaleForOpenCashShift(data)
         && data.items is list && data.items.size() > 0 && data.items.size() <= 100
         && validNonNegative(data.total)
+        && data.totalCents is int && data.totalCents >= 0 && data.totalCents < 100000000000
+        && data.total == data.totalCents / 100
         && validNonNegative(data.liters)
         && isOwnAuthorship(data.createdBy)
         && data.timestamp == request.time;
+    }
+
+    // Rules for opening a shift: only a fresh, empty shift can be created.
+    function isValidOpenCashShift(data, shiftId) {
+      return hasOnlyKeys(data, ['shiftId', 'cashierId', 'storeId', 'status', 'openingCashCents',
+          'openedBy', 'openedAt', 'paymentTotalsCents', 'saleCount'])
+        && data.keys().hasAll(['shiftId', 'cashierId', 'storeId', 'status', 'openingCashCents',
+          'openedBy', 'openedAt', 'paymentTotalsCents', 'saleCount'])
+        && data.shiftId == shiftId
+        && data.cashierId == request.auth.uid
+        && validText(data.storeId, 100) && data.storeId.size() > 0
+        && data.status == 'open'
+        && data.openingCashCents is int
+        && data.openingCashCents >= 0 && data.openingCashCents < 100000000000
+        && data.openedBy.keys().hasOnly(['userId', 'userName', 'userRole'])
+        && data.openedBy.userId == request.auth.uid
+        && validText(data.openedBy.userName, 100)
+        && data.openedBy.userRole in ['admin', 'supervisor', 'cajero', 'custom']
+        && data.openedAt == request.time
+        && data.paymentTotalsCents == {'cash': 0, 'card': 0, 'transfer': 0}
+        && data.saleCount == 0;
+    }
+
+    // Closing only adds the count fields; expected cash is derived from stored values.
+    function isValidCashShiftClose(oldData, newData) {
+      let expected = oldData.openingCashCents + oldData.paymentTotalsCents.cash;
+      return newData.status == 'closed'
+        && changedKeys().hasOnly(['status', 'closedBy', 'closedAt', 'countedCashCents',
+          'expectedCashCents', 'cashDifferenceCents'])
+        && newData.keys().hasAll(['closedBy', 'closedAt', 'countedCashCents',
+          'expectedCashCents', 'cashDifferenceCents'])
+        && newData.closedBy.keys().hasOnly(['userId', 'userName', 'userRole'])
+        && newData.closedBy.userId == request.auth.uid
+        && validText(newData.closedBy.userName, 100)
+        && newData.closedBy.userRole in ['admin', 'supervisor', 'cajero', 'custom']
+        && newData.closedAt == request.time
+        && newData.countedCashCents is int
+        && newData.countedCashCents >= 0 && newData.countedCashCents < 100000000000
+        && newData.expectedCashCents == expected
+        && newData.cashDifferenceCents == newData.countedCashCents - expected
+        && isClosedShiftLinkedToRegister(newData);
+    }
+
+    function isValidCashRegister(data, cashierId) {
+      return hasOnlyKeys(data, ['cashierId', 'storeId', 'shiftId', 'status', 'updatedAt'])
+        && data.keys().hasAll(['cashierId', 'storeId', 'shiftId', 'status', 'updatedAt'])
+        && data.cashierId == cashierId
+        && validText(data.storeId, 100) && data.storeId.size() > 0
+        && validText(data.shiftId, 100) && data.shiftId.size() > 0
+        && data.status in ['open', 'closed']
+        && data.updatedAt == request.time;
     }
 
     function isValidMovement(data) {
@@ -276,9 +482,57 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /cashShifts/{shiftId} {
+      allow read: if isAdmin()
+        || (isAuthenticated() && resource.data.cashierId == request.auth.uid);
+
+      allow create: if canOperatePOS()
+        && canOperateStore(request.resource.data.storeId)
+        && isValidOpenCashShift(request.resource.data, shiftId)
+        && isOpenShiftLinkedToRegister(request.resource.data);
+
+      allow update: if isOwner(resource.data.cashierId)
+        && resource.data.status == 'open'
+        && request.resource.data.shiftId == shiftId
+        && (isValidCashShiftClose(resource.data, request.resource.data)
+          || isValidCashShiftSaleUpdate(resource.data, request.resource.data, shiftId));
+
+      allow delete: if false;
+    }
+
+    // A deterministic register document per user prevents concurrent open shifts.
+    // The shift written in the same batch carries the permission and store checks.
+    match /cashRegisters/{cashierId} {
+      allow read: if isAdmin() || isOwner(cashierId);
+
+      allow create: if isOwner(cashierId)
+        && isValidCashRegister(request.resource.data, cashierId)
+        && request.resource.data.status == 'open'
+        && isOpenShiftLinkedToRegister(request.resource.data);
+
+      allow update: if isOwner(cashierId)
+        && isValidCashRegister(request.resource.data, cashierId)
+        && changedKeys().hasOnly(['storeId', 'shiftId', 'status', 'updatedAt'])
+        && (
+          (resource.data.status == 'open'
+            && request.resource.data.status == 'closed'
+            && request.resource.data.shiftId == resource.data.shiftId
+            && isClosedShiftLinkedToRegister(request.resource.data))
+          || (resource.data.status == 'closed'
+            && request.resource.data.status == 'open'
+            && request.resource.data.shiftId != resource.data.shiftId
+            && isOpenShiftLinkedToRegister(request.resource.data))
+        );
+
+      allow delete: if false;
+    }
+
     match /stores/{storeId} {
       allow read: if isActiveStaff();
-      allow create, update: if isAdmin() && isValidStore(request.resource.data);
+      allow create: if isAdmin() && isValidStore(request.resource.data);
+      allow update: if (isAdmin() && isValidStore(request.resource.data))
+        || isCashShiftStoreCounterIncrease(storeId)
+        || isCashShiftStoreCounterDecrease(storeId);
       allow delete: if false;
     }
 
@@ -310,7 +564,8 @@ service cloud.firestore {
 
     match /sales/{saleId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
-      allow create: if canOperateStore(request.resource.data.storeId)
+      allow create: if canOperatePOS()
+        && canOperateStore(request.resource.data.storeId)
         && isValidSale(request.resource.data);
       allow update, delete: if false;
     }

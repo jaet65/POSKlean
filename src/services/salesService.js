@@ -8,7 +8,7 @@ import { db } from '../firebase';
 
 const roundToCents = (value) => Number(value.toFixed(2));
 
-export async function createSale({ cart, channel, user, storeId }) {
+export async function createSale({ cart, channel, paymentMethod, shiftId, user, storeId }) {
   if (!db) {
     throw new Error('No se puede registrar la venta: configura primero Firebase.');
   }
@@ -17,6 +17,14 @@ export async function createSale({ cart, channel, user, storeId }) {
   }
   if (typeof channel !== 'string' || !channel.trim()) {
     throw new Error('Selecciona un canal de venta válido.');
+  }
+  if (!['cash', 'card', 'transfer'].includes(paymentMethod)) {
+    throw new Error('Selecciona un método de pago válido.');
+  }
+  const cashierId = user?.id || user?.uid;
+  if (!cashierId || typeof shiftId !== 'string' || !shiftId.trim()
+    || typeof storeId !== 'string' || !storeId.trim()) {
+    throw new Error('Abre un turno de caja antes de registrar la venta.');
   }
 
   const quantitiesByProduct = new Map();
@@ -34,6 +42,8 @@ export async function createSale({ cart, channel, user, storeId }) {
   const saleRef = doc(collection(db, 'sales'));
   const ticketId = `VTA-${saleRef.id.slice(0, 8).toUpperCase()}`;
   const productRefs = [...quantitiesByProduct.keys()].map((id) => doc(db, 'products', id));
+  const shiftRef = doc(db, 'cashShifts', shiftId);
+  const registerRef = doc(db, 'cashRegisters', cashierId);
 
   const userInfo = {
     userId: user?.id || user?.uid || null,
@@ -43,6 +53,27 @@ export async function createSale({ cart, channel, user, storeId }) {
   };
 
   return runTransaction(db, async (transaction) => {
+    const [shiftSnapshot, registerSnapshot] = await Promise.all([
+      transaction.get(shiftRef),
+      transaction.get(registerRef),
+    ]);
+    if (!shiftSnapshot.exists() || shiftSnapshot.data().status !== 'open'
+      || shiftSnapshot.data().cashierId !== cashierId
+      || shiftSnapshot.data().storeId !== storeId) {
+      throw new Error('El turno no está abierto para esta caja. Abre un turno y vuelve a intentar.');
+    }
+    if (!registerSnapshot.exists()
+      || registerSnapshot.data().status !== 'open'
+      || registerSnapshot.data().shiftId !== shiftId) {
+      throw new Error('El turno ya está cerrado o dejó de ser el turno activo.');
+    }
+    const shiftPaymentTotals = shiftSnapshot.data().paymentTotalsCents;
+    const shiftSaleCount = shiftSnapshot.data().saleCount;
+    if (!shiftPaymentTotals || !Number.isSafeInteger(shiftPaymentTotals[paymentMethod])
+      || !Number.isSafeInteger(shiftSaleCount) || shiftSaleCount < 0) {
+      throw new Error('El resumen del turno tiene datos inválidos.');
+    }
+
     const productSnapshots = await Promise.all(
       productRefs.map((productRef) => transaction.get(productRef)),
     );
@@ -74,10 +105,15 @@ export async function createSale({ cart, channel, user, storeId }) {
     });
 
     const total = roundToCents(saleItems.reduce((sum, item) => sum + item.total, 0));
+    const totalCents = Math.round(total * 100);
     const liters = Number(saleItems.reduce((sum, item) => sum + item.qty, 0).toFixed(2));
     const sale = {
       ticketId,
       channel: channel.trim(),
+      paymentMethod,
+      shiftId,
+      cashierId,
+      totalCents,
       items: saleItems.map(({ previousStock: _prev, newStock: _newStock, ...item }) => item),
       total,
       liters,
@@ -110,6 +146,14 @@ export async function createSale({ cart, channel, user, storeId }) {
       ...sale,
       storeId,
       timestamp: serverTimestamp(),
+    });
+    transaction.update(shiftRef, {
+      paymentTotalsCents: {
+        ...shiftPaymentTotals,
+        [paymentMethod]: shiftPaymentTotals[paymentMethod] + totalCents,
+      },
+      saleCount: shiftSaleCount + 1,
+      lastSaleId: saleRef.id,
     });
 
     return {

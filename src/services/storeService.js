@@ -124,7 +124,7 @@ const saveStoreDetails = async ({ storeId = null, previousCashierIds = [], ...de
       ...store,
       ...(storeId
         ? { updatedAt: now }
-        : { status: 'active', createdAt: now }),
+        : { status: 'active', createdAt: now, openCashShiftCount: 0 }),
     };
     if (storeId) {
       transaction.update(storeRef, storeData);
@@ -175,6 +175,14 @@ export async function updateStoreStatus(storeId, status) {
       || (storeData.status === 'archived' && status === 'active');
     if (storeData.status === status
       && (!needsAssignmentCleanup || (storedCashierIds.length === 0 && assignedCashiers.empty))) return;
+
+    const openCashShiftCount = storeData.openCashShiftCount ?? 0;
+    if (!Number.isSafeInteger(openCashShiftCount) || openCashShiftCount < 0) {
+      throw new Error('El contador de turnos abiertos de la tienda no es válido.');
+    }
+    if (status === 'archived' && openCashShiftCount > 0) {
+      throw new Error('Cierra los turnos de caja abiertos antes de archivar la tienda.');
+    }
 
     const cashierIds = new Set([
       ...storedCashierIds,

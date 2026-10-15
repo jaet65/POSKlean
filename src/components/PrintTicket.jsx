@@ -34,6 +34,13 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           <span>Canal: </span>
           <span>{data.channel}</span>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Pago: </span>
+          <span>{data.paymentMethod === 'cash' ? 'Efectivo'
+            : data.paymentMethod === 'card' ? 'Tarjeta'
+              : data.paymentMethod === 'transfer' ? 'Transferencia'
+                : 'No registrado'}</span>
+        </div>
           <hr />
           {data.items.map((item) => (
             <div className="receipt-item" key={item.productId || item.name}>
@@ -143,7 +150,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
       {type === 'cashClosure' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold' }}>
-            <span>CIERRE DE CAJA</span>
+            <span>RESUMEN DE VENTAS</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Fecha:</span>
@@ -196,6 +203,33 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           </div>
           <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
 
+        </>
+      )}
+
+      {type === 'cashShift' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold' }}>
+            <span>CIERRE DE TURNO</span>
+          </div>
+          <div className="receipt-item"><span>Tienda</span><strong>{data.storeName || data.storeId}</strong></div>
+          <div className="receipt-item"><span>Turno</span><strong>{data.id.slice(0, 8).toUpperCase()}</strong></div>
+          <div className="receipt-item"><span>Cajero</span><strong>{data.closedBy?.userName || data.openedBy?.userName || 'Desconocido'}</strong></div>
+          <div className="receipt-item"><span>Cierre</span><strong>{data.timestamp || 'Fecha no disponible'}</strong></div>
+          <hr />
+          <div className="receipt-item"><span>Tickets</span><strong>{data.saleCount ?? 0}</strong></div>
+          <div className="receipt-item"><span>Fondo inicial</span><strong>{formatCurrency(data.openingCashCents / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Ventas en efectivo</span><strong>{formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Ventas con tarjeta</span><strong>{formatCurrency((data.paymentTotalsCents?.card || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Ventas por transferencia</span><strong>{formatCurrency((data.paymentTotalsCents?.transfer || 0) / 100)} MXN</strong></div>
+          <hr />
+          <div className="receipt-item"><span>Efectivo esperado</span><strong>{formatCurrency(data.expectedCashCents / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Efectivo contado</span><strong>{formatCurrency(data.countedCashCents / 100)} MXN</strong></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }} className="receipt-total">
+            <span>Diferencia</span>
+            <span>{formatCurrency(data.cashDifferenceCents / 100)} MXN</span>
+          </div>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+          <p style={{ textAlign: 'center' }}>Cierre registrado por {data.closedBy?.userName || 'Desconocido'}</p>
         </>
       )}
 
