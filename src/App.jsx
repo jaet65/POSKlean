@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
+import PurchasingPanel from './components/PurchasingPanel';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
 import { 
@@ -221,6 +222,7 @@ export default function App() {
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
   const currentUserId = currentUser?.id || currentUser?.uid || null;
   const isStoreManager = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
+  const canAccessPurchases = isStoreManager && currentUser?.status === 'active';
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const isGeneralView = isStoreManager && !selectedStoreId;
   const canUsePos = canAccessPos && !isGeneralView;
@@ -293,13 +295,15 @@ export default function App() {
     pos: canUsePos,
     inventory: canAccessInventory,
     sales: canAccessSales,
+    purchases: canAccessPurchases,
     users: canAccessUsers,
   };
   const fallbackTabs = {
-    pos: ['inventory', 'sales', 'users'],
-    inventory: ['pos', 'sales', 'users'],
-    sales: ['pos', 'inventory', 'users'],
-    users: ['pos', 'inventory', 'sales'],
+    pos: ['inventory', 'purchases', 'sales', 'users'],
+    inventory: ['pos', 'purchases', 'sales', 'users'],
+    purchases: ['pos', 'inventory', 'sales', 'users'],
+    sales: ['pos', 'inventory', 'purchases', 'users'],
+    users: ['pos', 'inventory', 'purchases', 'sales'],
   };
   const visibleTab = !currentUser || currentUser.status !== 'active' || tabPermissions[activeTab]
     ? activeTab
@@ -1668,6 +1672,21 @@ export default function App() {
             </button>
           )}
 
+          {canAccessPurchases && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('purchases')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                visibleTab === 'purchases' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              <span>Compras</span>
+            </button>
+          )}
+
           {canAccessSales && (
             <button
               type="button"
@@ -1994,6 +2013,15 @@ export default function App() {
           </div>
         )}
 
+        {visibleTab === 'purchases' && canAccessPurchases && (
+          <PurchasingPanel
+            currentUser={currentUser}
+            activeStoreId={activeStoreId}
+            stores={activeStores}
+            products={products}
+          />
+        )}
+
         {/* TAB 2: INVENTARIO & RESURTIDO */}
         {visibleTab === 'inventory' && canAccessInventory && (
           <div className="space-y-5">
@@ -2311,6 +2339,7 @@ export default function App() {
                         <option value="all">Todos</option>
                         <option value="initial">Alta de producto</option>
                         <option value="restock">Resurtido</option>
+                        <option value="purchase">Compra a proveedor</option>
                         <option value="sale">Venta</option>
                         <option value="audit">Auditoría</option>
                       </select>
@@ -2335,7 +2364,9 @@ export default function App() {
                             {filteredMovements.map((movement) => {
                               const movementLabel = movement.type === 'restock'
                                 ? 'Resurtido'
-                                : movement.type === 'sale'
+                                : movement.type === 'purchase'
+                                  ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
+                                  : movement.type === 'sale'
                                   ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
                                   : movement.type === 'audit'
                                     ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`

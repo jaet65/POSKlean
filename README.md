@@ -50,6 +50,12 @@ Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pe
 
 Al archivar una tienda, la operación elimina en una transacción las asignaciones de sus cajeros tanto en los perfiles como en la tienda. Esos usuarios quedan sin tienda y no pueden operar en el POS hasta que se les asigne una tienda activa. Reactivar una tienda no restaura asignaciones anteriores; deben hacerse explícitamente desde la administración. Las reglas permiten consultar información histórica de tiendas archivadas a administradores, pero bloquean nuevas ventas y modificaciones de inventario en ellas.
 
+### Compras y proveedores
+
+La pestaña Compras (administradores y supervisores) mantiene un catálogo global de proveedores, que se archivan en lugar de borrarse, y órdenes de compra por tienda. Una orden nace `pending`, pasa a `partial` o `received` con cada recepción (admite recepciones parciales) y solo puede cancelarse mientras no tenga recepciones. Al recibir, una transacción suma el stock, recalcula el costo del producto como promedio ponderado entre el stock actual y lo recibido, y registra un movimiento de inventario tipo `purchase`. Si quien recibe es administrador, se le sugiere un nuevo precio de venta (costo promedio ÷ 0.5, es decir 50% de margen sobre la venta) y decide si aplicarlo; los supervisores no modifican precios. Los productos nuevos creados desde una orden sugieren su precio con el mismo criterio. No incluye cuentas por pagar.
+
+Limitaciones: las reglas no iteran las líneas de la orden (solo validan que sea una lista de 1 a 50 elementos; el detalle se valida en el cliente), no enlazan la recepción con el producto ni el movimiento correspondientes, y un supervisor puede modificar el costo de productos de sus tiendas. Cualquier regla nueva debe publicarse con `firebase deploy --only firestore:rules`.
+
 ## Impresión de tickets
 
 Desde el POS se puede imprimir el ticket después del cobro, o reimprimir cualquier ticket desde el historial. El selector permite ajustar el ancho a impresoras de 58 mm u 80 mm.

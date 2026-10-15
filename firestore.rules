@@ -40,8 +40,21 @@ rules_version = '2';
 //   cashierId, storeId, shiftId, status: string; updatedAt: timestamp
 //
 // Collection: inventoryMovements   Document ID: auto (immutable once created)
-//   type, productId, productName, unit: string; amount, previousStock, newStock: number;
+//   type ('sale'|'restock'|'initial'|'audit'|'purchase'), productId, productName, unit: string;
+//   amount, previousStock, newStock: number;
 //   createdBy: map; storeId: string; timestamp: timestamp; audit-only extra fields
+//
+// Collection: suppliers         Document ID: auto (never deleted, only archived)
+//   name: string; contactName, phone, email, notes?: string;
+//   status: 'active'|'archived'; createdBy: map; createdAt, updatedAt: timestamp
+//
+// Collection: purchaseOrders    Document ID: auto
+//   storeId, supplierId, supplierName, orderNumber: string;
+//   status: 'pending'|'partial'|'received'|'cancelled';
+//   items: list of {productId, productName, unit, qtyOrdered, qtyReceived, unitCostCents};
+//   totalCents, receivedCents: int; notes?: string; createdBy: map;
+//   createdAt, updatedAt: timestamp; receivedAt?, cancelledAt?: timestamp
+//   Only admins and supervisors read or write suppliers and purchase orders.
 //
 // Known limits: stock/price numbers written by the client cannot be fully
 // verified server-side; a malicious cashier of a store could still alter stock or
@@ -165,6 +178,15 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSuperAdmin() || (isActiveStaff() && profile().role == 'admin');
+    }
+
+    // Suppliers and purchase orders are managed by administrators and supervisors.
+    function isPurchasingStaff() {
+      return isAdmin() || (isActiveStaff() && profile().role == 'supervisor');
+    }
+
+    function supplierPath(supplierId) {
+      return /databases/$(database)/documents/suppliers/$(supplierId);
     }
 
     // Cashiers are confined to their assigned store; other active roles see all stores.
@@ -446,7 +468,7 @@ service cloud.firestore {
     }
 
     function isValidMovement(data) {
-      return data.type in ['sale', 'restock', 'initial', 'audit']
+      return data.type in ['sale', 'restock', 'initial', 'audit', 'purchase']
         && validText(data.get('productId', ''), 100) && data.get('productId', '') != ''
         && validText(data.get('productName', ''), 120)
         && validText(data.get('unit', 'L'), 10)
@@ -456,6 +478,79 @@ service cloud.firestore {
         && isOwnAuthorship(data.createdBy)
         && data.timestamp == request.time
         && data.keys().size() <= 30;
+    }
+
+    function isNewSupplier(data) {
+      return hasOnlyKeys(data, ['name', 'contactName', 'phone', 'email', 'notes', 'status',
+          'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['name', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && isValidSupplierFields(data)
+        && data.status == 'active'
+        && isOwnAuthorship(data.createdBy)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSupplierFields(data) {
+      return validText(data.get('name', ''), 120) && data.get('name', '') != ''
+        && validOptionalText(data, 'contactName', 120)
+        && validOptionalText(data, 'phone', 40)
+        && validOptionalText(data, 'email', 200)
+        && validOptionalText(data, 'notes', 500)
+        && data.status in ['active', 'archived'];
+    }
+
+    function isSupplierUpdate(newData) {
+      return changedKeys().hasOnly(['name', 'contactName', 'phone', 'email', 'notes',
+          'status', 'updatedAt'])
+        && isValidSupplierFields(newData)
+        && newData.updatedAt == request.time;
+    }
+
+    // Order lines are validated by the app: security rules cannot loop over lists.
+    function isNewPurchaseOrder(data) {
+      let supplier = get(supplierPath(data.supplierId)).data;
+      return hasOnlyKeys(data, ['storeId', 'supplierId', 'supplierName', 'status', 'items',
+          'totalCents', 'receivedCents', 'orderNumber', 'notes', 'createdBy', 'createdAt',
+          'updatedAt'])
+        && data.keys().hasAll(['storeId', 'supplierId', 'supplierName', 'status', 'items',
+          'totalCents', 'receivedCents', 'orderNumber', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.status == 'pending'
+        && validText(data.supplierId, 100) && data.supplierId.size() > 0
+        && validText(data.supplierName, 120) && data.supplierName.size() > 0
+        && validText(data.orderNumber, 30) && data.orderNumber.size() > 0
+        && validOptionalText(data, 'notes', 500)
+        && data.items is list && data.items.size() >= 1 && data.items.size() <= 50
+        && data.totalCents is int && data.totalCents >= 0 && data.totalCents < 100000000000
+        && data.receivedCents == 0
+        && isOwnAuthorship(data.createdBy)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && supplier.status == 'active'
+        && supplier.name == data.supplierName;
+    }
+
+    function isPurchaseOrderReceipt(oldData, newData) {
+      return oldData.status in ['pending', 'partial']
+        && newData.status in ['partial', 'received']
+        && changedKeys().hasOnly(['status', 'items', 'receivedCents', 'updatedAt',
+          'receivedAt', 'lastReceivedBy'])
+        && newData.items is list && newData.items.size() == oldData.items.size()
+        && newData.receivedCents is int
+        && newData.receivedCents >= oldData.receivedCents
+        && newData.receivedCents < 100000000000
+        && newData.updatedAt == request.time
+        && newData.receivedAt == request.time
+        && isOwnAuthorship(newData.lastReceivedBy);
+    }
+
+    function isPurchaseOrderCancellation(oldData, newData) {
+      return oldData.status == 'pending'
+        && newData.status == 'cancelled'
+        && changedKeys().hasOnly(['status', 'updatedAt', 'cancelledAt', 'cancelledBy'])
+        && newData.updatedAt == request.time
+        && newData.cancelledAt == request.time
+        && isOwnAuthorship(newData.cancelledBy);
     }
 
     // ===============================================================
@@ -549,6 +644,10 @@ service cloud.firestore {
         && (
           // Sales, restocks and audits adjust stock (and its audit trail) only.
           changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt'])
+          // Purchase receipts also refresh the unit cost.
+          || (isPurchasingStaff()
+            && changedKeys().hasOnly(['currentStock', 'cost', 'lastRestockedBy', 'lastRestockedAt'])
+            && validNonNegative(request.resource.data.cost))
           // Only admins change catalog data and the alert threshold.
           || (isAdmin()
             && changedKeys().hasOnly(['name', 'category', 'currentStock', 'minStock', 'unit',
@@ -574,8 +673,28 @@ service cloud.firestore {
       allow read: if canAccessStore(resource.data.get('storeId', null));
       allow create: if canOperateStore(request.resource.data.storeId)
         && isValidMovement(request.resource.data)
-        && (request.resource.data.type != 'audit' || isAdmin());
+        && (request.resource.data.type != 'audit' || isAdmin())
+        && (request.resource.data.type != 'purchase' || isPurchasingStaff());
       allow update, delete: if false;
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isPurchasingStaff();
+      allow create: if isPurchasingStaff() && isNewSupplier(request.resource.data);
+      allow update: if isPurchasingStaff() && isSupplierUpdate(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /purchaseOrders/{orderId} {
+      allow read: if isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null));
+      allow create: if isPurchasingStaff()
+        && canOperateStore(request.resource.data.storeId)
+        && isNewPurchaseOrder(request.resource.data);
+      allow update: if isPurchasingStaff()
+        && canOperateStore(resource.data.get('storeId', null))
+        && (isPurchaseOrderReceipt(resource.data, request.resource.data)
+          || isPurchaseOrderCancellation(resource.data, request.resource.data));
+      allow delete: if false;
     }
   }
 }
