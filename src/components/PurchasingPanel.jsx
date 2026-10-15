@@ -261,7 +261,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const handleReceive = async (event) => {
     event.preventDefault();
     const modal = receiveModal;
-    const canUpdatePrices = currentUser?.role === 'admin';
+    const canUpdatePrices = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
 
     if (canUpdatePrices && !modal.plan) {
       const plan = modal.inputs.flatMap((input, index) => {

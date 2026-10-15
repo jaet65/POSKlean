@@ -644,10 +644,13 @@ service cloud.firestore {
         && (
           // Sales, restocks and audits adjust stock (and its audit trail) only.
           changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt'])
-          // Purchase receipts also refresh the unit cost.
+          // Purchase receipts also refresh the unit cost and, optionally, the sale price.
           || (isPurchasingStaff()
-            && changedKeys().hasOnly(['currentStock', 'cost', 'lastRestockedBy', 'lastRestockedAt'])
-            && validNonNegative(request.resource.data.cost))
+            && changedKeys().hasOnly(['currentStock', 'cost', 'price', 'lastRestockedBy',
+              'lastRestockedAt'])
+            && validNonNegative(request.resource.data.cost)
+            && validNonNegative(request.resource.data.price)
+            && request.resource.data.price > 0)
           // Only admins change catalog data and the alert threshold.
           || (isAdmin()
             && changedKeys().hasOnly(['name', 'category', 'currentStock', 'minStock', 'unit',
