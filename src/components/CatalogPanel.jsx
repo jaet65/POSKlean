@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Archive, ChevronDown, ChevronRight, Layers, Pencil, Plus, RotateCcw, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Archive, ChevronDown, ChevronRight, Layers, Pencil, Plus, RotateCcw, Upload, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
+import { CSV_TEMPLATE, parseCatalogCsv } from '../utils/catalogCsv';
 import {
   createCatalogProduct,
   enableCatalogProductInStore,
+  importCatalogProducts,
   setCatalogProductStatus,
   setStorePriceOverride,
   updateCatalogProduct,
 } from '../services/catalogService';
 import { suggestedSalePrice } from '../services/purchaseService';
+import { subscribeToSuppliers } from '../services/supplierService';
 
 const UNIT_OPTIONS = [
   ['L', 'L (Litro)'],
@@ -43,6 +46,7 @@ const EMPTY_FORM = {
   storeId: '',
   stock: '0',
   minStock: '10',
+  supplierId: '',
   cost: '',
 };
 const inputClass = 'w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none';
@@ -57,6 +61,55 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [csvPreview, setCsvPreview] = useState(null);
+  const [suppliers, setSuppliers] = useState([]);
+  useEffect(() => subscribeToSuppliers(setSuppliers, () => setSuppliers([])), []);
+  const activeSuppliers = useMemo(
+    () => suppliers.filter((supplier) => supplier.status !== 'archived'),
+    [suppliers],
+  );
+  const supplierNameById = useMemo(
+    () => new Map(suppliers.map((supplier) => [supplier.id, supplier.name])),
+    [suppliers],
+  );
+  const csvInputRef = useRef(null);
+
+  const downloadTemplate = () => {
+    const url = URL.createObjectURL(new Blob([`\uFEFF${CSV_TEMPLATE}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'plantilla-catalogo.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCsvFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError('');
+    setNotice('');
+    if (file.size > 1024 * 1024) {
+      setError('El archivo CSV es demasiado grande (máximo 1 MB).');
+      return;
+    }
+    setCsvPreview(parseCatalogCsv(await file.text(), suppliers));
+  };
+
+  const confirmCsvImport = async () => {
+    if (!csvPreview || busy) return;
+    setBusy(true);
+    try {
+      const { created, skipped } = await importCatalogProducts(csvPreview.rows, currentUser);
+      setCsvPreview(null);
+      setNotice(`Importación completada: ${created} creado(s)${skipped ? `, ${skipped} omitido(s) por ya existir` : ''}.`);
+    } catch (importError) {
+      setCsvPreview(null);
+      setError(importError.message || 'No se pudo importar el catálogo.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const visibleStores = useMemo(
     () => (activeStoreId ? stores.filter((store) => store.id === activeStoreId) : stores),
@@ -110,6 +163,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
         color: item.color || 'bg-cyan-500',
         price: String(item.price),
         minStock: String(item.minStock ?? 0),
+        supplierId: item.supplierId || '',
       }
       : {
         ...EMPTY_FORM,
@@ -141,6 +195,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
       color: form.color,
       price,
       minStock: parseFloat(form.minStock || '0'),
+      supplierId: form.supplierId || null,
     };
     const ok = await run(async () => {
       if (form.id) {
@@ -199,13 +254,30 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             Un solo producto para todas las tiendas. Las existencias, el mínimo, el costo y, si hace falta, el precio propio se manejan por sucursal.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => openProductForm()}
-          className="flex items-center gap-1.5 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400"
-        >
-          <Plus className="h-4 w-4" /> Nuevo producto
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            className="rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-slate-600"
+          >
+            Plantilla CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => csvInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-slate-600"
+          >
+            <Upload className="h-4 w-4" /> Importar CSV
+          </button>
+          <input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="hidden" aria-label="Archivo CSV del catálogo" />
+          <button
+            type="button"
+            onClick={() => openProductForm()}
+            className="flex items-center gap-1.5 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400"
+          >
+            <Plus className="h-4 w-4" /> Nuevo producto
+          </button>
+        </div>
       </div>
 
       {notice && <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/20 p-3 text-xs text-emerald-300">{notice}</p>}
@@ -233,6 +305,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             <tr>
               <th className="px-4 py-3">Producto</th>
               <th className="px-4 py-3">Categoría</th>
+              <th className="px-4 py-3">Proveedor</th>
               <th className="px-4 py-3">Precio compra</th>
               <th className="px-4 py-3">Precio venta</th>
               <th className="px-4 py-3">Tiendas</th>
@@ -241,7 +314,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
           </thead>
           <tbody className="divide-y divide-slate-700/60">
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">No hay productos en el catálogo.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No hay productos en el catálogo.</td></tr>
             )}
             {rows.flatMap((item) => {
               const enabledCount = visibleStores.filter((store) => stockByKey.has(`${store.id}|${item.id}`)).length;
@@ -280,6 +353,11 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                     </button>
                   </td>
                   <td className="px-4 py-3">{item.category}</td>
+                  <td className="px-4 py-3">
+                    {item.supplierId
+                      ? supplierNameById.get(item.supplierId) || 'Proveedor archivado'
+                      : <span className="text-amber-300">Sin proveedor</span>}
+                  </td>
                   <td className="px-4 py-3 font-mono text-amber-300">{costLabel}</td>
                   <td className="px-4 py-3 font-mono font-bold text-cyan-400">{priceLabel}</td>
                   <td className="px-4 py-3">{enabledCount} de {visibleStores.length}</td>
@@ -296,7 +374,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
               if (expanded) {
                 result.push(
                   <tr key={`${item.id}-stores`} className="bg-slate-900/50">
-                    <td colSpan={6} className="space-y-2 px-4 py-3">
+                    <td colSpan={7} className="space-y-2 px-4 py-3">
                       {visibleStores.length === 0 && <p className="text-slate-400">No hay tiendas activas.</p>}
                       {visibleStores.map((store) => {
                         const stock = stockByKey.get(`${store.id}|${item.id}`);
@@ -365,6 +443,38 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
         </table>
       </div>
 
+      {csvPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
+          <div role="dialog" aria-modal="true" aria-label="Importar catálogo" className="w-full max-w-lg space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <h2 className="text-base font-bold text-white">Importar catálogo desde CSV</h2>
+              <button type="button" onClick={() => setCsvPreview(null)} aria-label="Cerrar" className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            <p className="text-xs text-slate-300">
+              <strong>{csvPreview.rows.length}</strong> producto(s) listos para importar
+              {csvPreview.errors.length > 0 && <>, <strong className="text-rose-300">{csvPreview.errors.length}</strong> fila(s) con errores (se omiten)</>}.
+              Los nombres que ya existen en el catálogo se omiten.
+            </p>
+            {csvPreview.errors.length > 0 && (
+              <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                {csvPreview.errors.map((item) => <li key={`${item.line}-${item.message}`}>Fila {item.line}: {item.message}</li>)}
+              </ul>
+            )}
+            {csvPreview.rows.length > 0 && (
+              <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
+                {csvPreview.rows.map((row) => (
+                  <li key={row.line}>{row.name} · {row.category} · {row.unit} · compra {formatCurrency(row.cost)} → venta {formatCurrency(row.price)} · mín. {row.minStock} · {row.supplierName || 'sin proveedor'}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setCsvPreview(null)} className="rounded-lg bg-slate-700 px-4 py-2 text-xs font-bold text-slate-100">Cancelar</button>
+              <button type="button" disabled={busy || csvPreview.rows.length === 0} onClick={confirmCsvImport} className="rounded-lg bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50">{busy ? 'Importando…' : 'Importar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
           <form onSubmit={submitProduct} role="dialog" aria-modal="true" aria-label="Producto del catálogo" className="w-full max-w-md space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
@@ -394,6 +504,17 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                   {UNIT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </div>
+            </div>
+            <div>
+              <label htmlFor="cat-supplier" className={labelClass}>Proveedor:</label>
+              <select id="cat-supplier" value={form.supplierId} onChange={(event) => setForm({ ...form, supplierId: event.target.value })} className={inputClass}>
+                <option value="">Sin proveedor</option>
+                {form.supplierId && !activeSuppliers.some((supplier) => supplier.id === form.supplierId) && (
+                  <option value={form.supplierId}>{supplierNameById.get(form.supplierId) || 'Proveedor archivado'}</option>
+                )}
+                {activeSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-500">Las órdenes de compra toman el proveedor de los productos que elijas.</p>
             </div>
             {!form.id && (
               <div>

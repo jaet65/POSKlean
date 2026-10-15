@@ -94,6 +94,12 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
     });
   }
   const items = lines.map((line) => {
+    const lineCatalogId = line.catalogId
+      || products.find((candidate) => candidate.id === line.productId)?.catalogId;
+    const lineCatalog = catalog.find((candidate) => candidate.id === lineCatalogId);
+    if (!line.newProduct && lineCatalog?.supplierId !== supplier.id) {
+      throw new Error(`${lineCatalog?.name || 'Un producto'} no pertenece al proveedor ${supplier.name}.`);
+    }
     if (line.newProduct) {
       const draft = line.newProduct;
       const name = String(draft.name || '').trim();
@@ -133,6 +139,7 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
           unit,
           color: 'bg-cyan-500',
           price: draft.price,
+          supplierId: supplier.id,
           status: 'active',
           createdBy: { ...userInfo(user), userEmail: user?.email || '' },
           createdAt: serverTimestamp(),

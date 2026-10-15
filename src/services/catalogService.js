@@ -7,6 +7,7 @@ import {
   runTransaction,
   serverTimestamp,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -31,7 +32,7 @@ const requireManager = (user) => {
 
 export const normalizeProductName = (name) => String(name || '').trim().toLocaleLowerCase('es-MX');
 
-function cleanCatalogFields({ name, category, unit, color, price, minStock = 0 }) {
+function cleanCatalogFields({ name, category, unit, color, price, minStock = 0, supplierId = null }) {
   const cleanName = String(name || '').trim();
   const cleanCategory = String(category || '').trim();
   const cleanUnit = String(unit || '').trim() || 'L';
@@ -53,6 +54,7 @@ function cleanCatalogFields({ name, category, unit, color, price, minStock = 0 }
     color: color || 'bg-cyan-500',
     price: numericPrice,
     minStock: numericMin,
+    supplierId: String(supplierId || '').trim() || null,
   };
 }
 
@@ -82,6 +84,41 @@ export async function createCatalogProduct(fields, user) {
     });
   });
   return ref.id;
+}
+
+// Importa filas ya validadas; omite los nombres que ya existen en el catálogo.
+export async function importCatalogProducts(rows, user) {
+  if (!db) throw new Error('Firestore no está inicializado.');
+  requireManager(user);
+  const existing = await getDocs(collection(db, 'catalogProducts'));
+  const names = new Set(existing.docs.map((item) => normalizeProductName(item.data().name)));
+  const toCreate = [];
+  let skipped = 0;
+  rows.forEach((row) => {
+    const clean = cleanCatalogFields(row);
+    if (names.has(normalizeProductName(clean.name))) {
+      skipped += 1;
+      return;
+    }
+    names.add(normalizeProductName(clean.name));
+    toCreate.push(clean);
+  });
+  const author = userInfo(user);
+  for (let start = 0; start < toCreate.length; start += 400) {
+    const batch = writeBatch(db);
+    toCreate.slice(start, start + 400).forEach((clean) => {
+      const now = serverTimestamp();
+      batch.set(doc(collection(db, 'catalogProducts')), {
+        ...clean,
+        status: 'active',
+        createdBy: author,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await batch.commit();
+  }
+  return { created: toCreate.length, skipped };
 }
 
 export async function updateCatalogProduct(catalogId, fields, user, allProducts = []) {

@@ -115,6 +115,25 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
     [storeProducts, catalog],
   );
 
+  const catalogById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
+  const lineSupplierId = useMemo(() => {
+    for (const line of orderForm.lines) {
+      const catalogId = line.catalogId || products.find((candidate) => candidate.id === line.productId)?.catalogId;
+      const supplierId = catalogId ? catalogById.get(catalogId)?.supplierId : null;
+      if (supplierId) return supplierId;
+    }
+    return '';
+  }, [orderForm.lines, products, catalogById]);
+  const needsSupplierPick = !lineSupplierId && orderForm.lines.some((line) => line.newProduct);
+  const orderSupplierId = lineSupplierId || (needsSupplierPick ? orderForm.supplierId : '');
+  const orderSupplier = activeSuppliers.find((supplier) => supplier.id === orderSupplierId) || null;
+  const supplierNote = (catalogId) => {
+    const supplierId = catalogById.get(catalogId)?.supplierId;
+    if (!supplierId || !activeSuppliers.some((supplier) => supplier.id === supplierId)) return ' (sin proveedor)';
+    if (lineSupplierId && supplierId !== lineSupplierId) return ' (otro proveedor)';
+    return '';
+  };
+
   const run = async (task, successMessage) => {
     setActionError('');
     setBusy(true);
@@ -210,7 +229,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
 
   const handleCreateOrder = async (event) => {
     event.preventDefault();
-    const supplier = suppliers.find((candidate) => candidate.id === orderForm.supplierId);
+    const supplier = orderSupplier;
     const ok = await run(
       () => createPurchaseOrder({
         storeId: orderForm.storeId,
@@ -618,11 +637,17 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                 </select>
               </div>
               <div>
-                <label htmlFor="order-supplier" className={labelClass}>Proveedor *</label>
-                <select id="order-supplier" required value={orderForm.supplierId} onChange={(event) => setOrderForm({ ...orderForm, supplierId: event.target.value })} className={inputClass}>
-                  <option value="">Selecciona un proveedor</option>
-                  {activeSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
-                </select>
+                <span className={labelClass}>Proveedor</span>
+                {needsSupplierPick ? (
+                  <select id="order-supplier" required aria-label="Proveedor del producto nuevo" value={orderForm.supplierId} onChange={(event) => setOrderForm({ ...orderForm, supplierId: event.target.value })} className={inputClass}>
+                    <option value="">Proveedor del producto nuevo</option>
+                    {activeSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                  </select>
+                ) : (
+                  <p className="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200">
+                    {orderSupplier ? orderSupplier.name : 'Se toma del producto que elijas'}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -646,16 +671,16 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                         <option value={NEW_PRODUCT}>+ Producto nuevo…</option>
                         <optgroup label="En esta tienda">
                           {storeProducts.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id} disabled={chosen.has(candidate.id) && candidate.id !== line.productId}>
-                              {candidate.name}
+                            <option key={candidate.id} value={candidate.id} disabled={(chosen.has(candidate.id) && candidate.id !== line.productId) || (candidate.id !== line.productId && supplierNote(candidate.catalogId) !== '')}>
+                              {candidate.name}{supplierNote(candidate.catalogId)}
                             </option>
                           ))}
                         </optgroup>
                         {catalogOptions.length > 0 && (
                           <optgroup label="Del catálogo (se habilita en la tienda)">
                             {catalogOptions.map((candidate) => (
-                              <option key={candidate.id} value={`${CATALOG_PREFIX}${candidate.id}`} disabled={chosenCatalog.has(candidate.id) && candidate.id !== line.catalogId}>
-                                {candidate.name}
+                              <option key={candidate.id} value={`${CATALOG_PREFIX}${candidate.id}`} disabled={(chosenCatalog.has(candidate.id) && candidate.id !== line.catalogId) || (candidate.id !== line.catalogId && supplierNote(candidate.id) !== '')}>
+                                {candidate.name}{supplierNote(candidate.id)}
                               </option>
                             ))}
                           </optgroup>
