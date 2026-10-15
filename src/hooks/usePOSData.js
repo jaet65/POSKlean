@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db, firebaseConfigError } from '../firebase';
 
@@ -20,13 +20,17 @@ const formatTimestamp = (timestamp) => {
 };
 
 export function usePOSData(storeId, enabled = true) {
-  const [products, setProducts] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [stockItems, setStockItems] = useState([]);
   const [sales, setSales] = useState([]);
   const [movements, setMovements] = useState([]);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [productsReady, setProductsReady] = useState(false);
   const [salesReady, setSalesReady] = useState(false);
   const [movementsReady, setMovementsReady] = useState(false);
-  const [errors, setErrors] = useState({ products: null, sales: null, movements: null });
+  const [errors, setErrors] = useState({
+    catalog: null, products: null, sales: null, movements: null,
+  });
 
   useEffect(() => {
     if (!db || !enabled) {
@@ -38,20 +42,35 @@ export function usePOSData(storeId, enabled = true) {
       ? query(collection(db, name), where('storeId', '==', storeId))
       : collection(db, name));
 
+    const unsubscribeCatalog = onSnapshot(
+      collection(db, 'catalogProducts'),
+      (snapshot) => {
+        setCatalog(snapshot.docs.map((catalogDoc) => ({ ...catalogDoc.data(), id: catalogDoc.id })));
+        setCatalogReady(true);
+        setErrors((previous) => ({ ...previous, catalog: null }));
+      },
+      (error) => {
+        setCatalogReady(true);
+        setErrors((previous) => ({ ...previous, catalog: `No se pudo cargar el catálogo: ${error.message}` }));
+      },
+    );
+
     const unsubscribeProducts = onSnapshot(
-      scopedCollection('products'),
+      scopedCollection('stockItems'),
       (snapshot) => {
         try {
-          const nextProducts = snapshot.docs.filter((productDoc) => !storeId || productDoc.data().storeId === storeId).map((productDoc) => {
-            const data = productDoc.data();
-            if (typeof data.name !== 'string' || typeof data.category !== 'string'
-              || !Number.isFinite(data.currentStock) || !Number.isFinite(data.minStock)
-              || !Number.isFinite(data.price) || !Number.isFinite(data.cost)) {
-              throw new Error(`El producto ${productDoc.id} debe tener stock, mínimo, precio y costo numéricos.`);
-            }
-            return { ...data, id: productDoc.id };
-          });
-          setProducts(nextProducts);
+          const nextStock = snapshot.docs
+            .filter((stockDoc) => !storeId || stockDoc.data().storeId === storeId)
+            .map((stockDoc) => {
+              const data = stockDoc.data();
+              if (typeof data.catalogId !== 'string' || typeof data.storeId !== 'string'
+                || !Number.isFinite(data.currentStock) || !Number.isFinite(data.minStock)
+                || !Number.isFinite(data.cost)) {
+                throw new Error(`Las existencias ${stockDoc.id} deben tener stock, mínimo y costo numéricos.`);
+              }
+              return { ...data, id: stockDoc.id };
+            });
+          setStockItems(nextStock);
           setProductsReady(true);
           setErrors((previous) => ({ ...previous, products: null }));
         } catch (error) {
@@ -61,7 +80,7 @@ export function usePOSData(storeId, enabled = true) {
       },
       (error) => {
         setProductsReady(true);
-        setErrors((previous) => ({ ...previous, products: `No se pudieron cargar los productos: ${error.message}` }));
+        setErrors((previous) => ({ ...previous, products: `No se pudieron cargar las existencias: ${error.message}` }));
       },
     );
 
@@ -128,14 +147,36 @@ export function usePOSData(storeId, enabled = true) {
     );
 
     return () => {
+      unsubscribeCatalog();
       unsubscribeProducts();
       unsubscribeSales();
       unsubscribeMovements();
     };
   }, [enabled, storeId]);
 
+  // Producto visible = ficha del catálogo + existencias de la tienda.
+  // El id es el de las existencias (único por tienda); catalogId apunta al catálogo.
+  const mergedProducts = useMemo(() => {
+    const catalogById = new Map(catalog.map((item) => [item.id, item]));
+    return stockItems.flatMap((stock) => {
+      const item = catalogById.get(stock.catalogId);
+      if (!item || item.status === 'archived' || !Number.isFinite(item.price)) return [];
+      const override = Number.isFinite(stock.priceOverride) ? stock.priceOverride : null;
+      return [{
+        ...stock,
+        name: item.name,
+        category: item.category,
+        unit: item.unit || 'L',
+        color: item.color || 'bg-cyan-500',
+        globalPrice: item.price,
+        price: override ?? item.price,
+        hasPriceOverride: override !== null,
+      }];
+    });
+  }, [catalog, stockItems]);
+
   const visibleProducts = enabled
-    ? (storeId ? products.filter((product) => product.storeId === storeId) : products)
+    ? (storeId ? mergedProducts.filter((product) => product.storeId === storeId) : mergedProducts)
     : [];
   const visibleSales = enabled
     ? (storeId ? sales.filter((sale) => sale.storeId === storeId) : sales)
@@ -146,11 +187,12 @@ export function usePOSData(storeId, enabled = true) {
 
   return {
     products: visibleProducts,
+    catalog: enabled ? catalog : [],
     sales: visibleSales,
     movements: visibleMovements,
-    loading: Boolean(db) && (!productsReady || !salesReady || !movementsReady),
+    loading: Boolean(db) && (!catalogReady || !productsReady || !salesReady || !movementsReady),
     error: !db
       ? firebaseConfigError
-      : [errors.products, errors.sales, errors.movements].filter(Boolean).join(' '),
+      : [errors.catalog, errors.products, errors.sales, errors.movements].filter(Boolean).join(' '),
   };
 }

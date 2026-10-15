@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
 import PurchasingPanel from './components/PurchasingPanel';
+import CatalogPanel from './components/CatalogPanel';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
 import { 
   ShoppingCart, 
   Package, 
   TrendingUp, 
-  PlusCircle, 
   AlertTriangle, 
   Search, 
   Trash2, 
@@ -44,6 +44,7 @@ import {
   completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
 import { createSale } from './services/salesService';
+import { setStorePriceOverride } from './services/catalogService';
 import { closeCashShift, openCashShift } from './services/cashShiftService';
 import {
   DEFAULT_PERMISSIONS,
@@ -77,30 +78,16 @@ const INITIAL_USER_FORM = {
   storeId: '',
 };
 
-const PRODUCT_COLORS = [
-  { name: 'Cian', class: 'bg-cyan-500' },
-  { name: 'Azul', class: 'bg-blue-500' },
-  { name: 'Esmeralda', class: 'bg-emerald-500' },
-  { name: 'Ámbar', class: 'bg-amber-500' },
-  { name: 'Púrpura', class: 'bg-purple-500' },
-  { name: 'Rosa', class: 'bg-rose-500' },
-  { name: 'Índigo', class: 'bg-indigo-500' },
-  { name: 'Lima', class: 'bg-lime-500' },
-  { name: 'Naranja', class: 'bg-orange-500' },
-  { name: 'Rojo', class: 'bg-red-500' },
-];
-
-const INITIAL_PRODUCT_FORM = {
-  name: '',
-  category: 'Jabón',
-  customCategory: '',
-  currentStock: '0',
-  minStock: '10',
-  unit: 'L',
-  price: '',
-  cost: '',
-  color: 'bg-cyan-500',
-  isPriceAutoSuggested: true,
+// Margen sobre la venta; 50% es el objetivo (precio = costo ÷ 0.5), con ±2 puntos de tolerancia.
+const getPriceLevel = (price, cost) => {
+  const sale = Number(price);
+  const purchase = Number(cost);
+  if (!Number.isFinite(sale) || !Number.isFinite(purchase) || sale <= 0 || purchase <= 0) return null;
+  const margin = ((sale - purchase) / sale) * 100;
+  const detail = `Margen ${margin.toFixed(0)}% sobre la venta (objetivo 50%)`;
+  if (margin < 48) return { label: 'Bajo', title: detail, className: 'bg-rose-500/20 text-rose-300' };
+  if (margin <= 52) return { label: 'Ok', title: detail, className: 'bg-emerald-500/20 text-emerald-300' };
+  return { label: 'Alto', title: detail, className: 'bg-amber-500/20 text-amber-300' };
 };
 
 const getCurrentDayRange = () => {
@@ -165,13 +152,12 @@ export default function App() {
   const [editingMinStockProductId, setEditingMinStockProductId] = useState(null);
   const [minStockDraft, setMinStockDraft] = useState('');
   const [isSavingMinStock, setIsSavingMinStock] = useState(false);
+  const [editingPriceProductId, setEditingPriceProductId] = useState(null);
+  const [priceDraft, setPriceDraft] = useState('');
+  const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   // Add Product Modal State
-  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
-  const [isAddingProduct, setIsAddingProduct] = useState(false);
-  const [productFormError, setProductFormError] = useState('');
   const [addProductSuccess, setAddProductSuccess] = useState('');
-  const [newProductForm, setNewProductForm] = useState(INITIAL_PRODUCT_FORM);
 
   // Auth & Permissions State
   const [currentUser, setCurrentUser] = useState(null);
@@ -181,7 +167,7 @@ export default function App() {
   const [loginMode, setLoginMode] = useState('credentials'); // 'credentials' | 'google'
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const { products, sales: salesHistory, movements, loading, error: dataError } = usePOSData(
+  const { products, catalog, sales: salesHistory, movements, loading, error: dataError } = usePOSData(
     currentUser?.role === 'cajero' ? currentUser?.storeId : selectedStoreId,
     Boolean(currentUser?.status === 'active'
       && (currentUser?.role !== 'cajero' || currentUser?.storeId)),
@@ -296,14 +282,16 @@ export default function App() {
     inventory: canAccessInventory,
     sales: canAccessSales,
     purchases: canAccessPurchases,
+    catalog: canAccessPurchases,
     users: canAccessUsers,
   };
   const fallbackTabs = {
-    pos: ['inventory', 'purchases', 'sales', 'users'],
-    inventory: ['pos', 'purchases', 'sales', 'users'],
-    purchases: ['pos', 'inventory', 'sales', 'users'],
-    sales: ['pos', 'inventory', 'purchases', 'users'],
-    users: ['pos', 'inventory', 'purchases', 'sales'],
+    pos: ['inventory', 'purchases', 'catalog', 'sales', 'users'],
+    inventory: ['pos', 'purchases', 'catalog', 'sales', 'users'],
+    purchases: ['pos', 'inventory', 'catalog', 'sales', 'users'],
+    catalog: ['pos', 'inventory', 'purchases', 'sales', 'users'],
+    sales: ['pos', 'inventory', 'purchases', 'catalog', 'users'],
+    users: ['pos', 'inventory', 'purchases', 'catalog', 'sales'],
   };
   const visibleTab = !currentUser || currentUser.status !== 'active' || tabPermissions[activeTab]
     ? activeTab
@@ -844,6 +832,28 @@ export default function App() {
     }
   };
 
+  const handleSavePrice = async (event, product) => {
+    event.preventDefault();
+    if (!isStoreManager || isSavingPrice) return;
+    const price = parseFloat(priceDraft);
+    if (!Number.isFinite(price) || price <= 0
+      || Number((price * 100).toFixed(0)) / 100 !== price) {
+      setActionError('Indica un precio de venta mayor a 0 con máximo dos decimales.');
+      return;
+    }
+    setActionError('');
+    setIsSavingPrice(true);
+    try {
+      await setStorePriceOverride(product.id, price === product.globalPrice ? null : price, currentUser);
+      setEditingPriceProductId(null);
+      setPriceDraft('');
+    } catch (error) {
+      setActionError(error.message || 'No se pudo actualizar el precio de venta.');
+    } finally {
+      setIsSavingPrice(false);
+    }
+  };
+
   const handleSaveMinStock = async (event, productId) => {
     event.preventDefault();
     const minStock = parseFloat(minStockDraft);
@@ -874,7 +884,6 @@ export default function App() {
         targetProduct.id,
         minStock,
         currentUser,
-        isGeneralView ? inventoryTargetStoreId : activeStoreId,
       );
       setEditingMinStockProductId(null);
       setMinStockDraft('');
@@ -882,122 +891,6 @@ export default function App() {
       setActionError(error.message || 'No se pudo actualizar el mínimo de alerta.');
     } finally {
       setIsSavingMinStock(false);
-    }
-  };
-
-  const handleOpenAddProduct = () => {
-    setNewProductForm({
-      ...INITIAL_PRODUCT_FORM,
-      category: availableCategories[0] || 'Jabón',
-    });
-    setProductFormError('');
-    setIsAddProductOpen(true);
-  };
-
-  const handleCloseAddProduct = () => {
-    if (isAddingProduct) return;
-    setIsAddProductOpen(false);
-    setProductFormError('');
-  };
-
-  const handleCostChange = (val) => {
-    setNewProductForm(prev => {
-      const numCost = parseFloat(val);
-      const shouldAutoFill = (!prev.price || prev.isPriceAutoSuggested) && !isNaN(numCost) && numCost > 0;
-      return {
-        ...prev,
-        cost: val,
-        price: shouldAutoFill ? (numCost / 0.5).toFixed(2) : prev.price,
-        isPriceAutoSuggested: shouldAutoFill ? true : prev.isPriceAutoSuggested,
-      };
-    });
-  };
-
-  const handlePriceChange = (val) => {
-    setNewProductForm(prev => ({
-      ...prev,
-      price: val,
-      isPriceAutoSuggested: false,
-    }));
-  };
-
-  const handleCreateProduct = async (e) => {
-    e.preventDefault();
-    if (isAddingProduct) return;
-    if (isGeneralView && !inventoryTargetStoreId) {
-      setProductFormError('Selecciona la tienda del nuevo producto.');
-      return;
-    }
-
-    const trimmedName = newProductForm.name.trim();
-    const targetStoreId = isGeneralView ? inventoryTargetStoreId : activeStoreId;
-    const finalCategory = newProductForm.category === '__custom__'
-      ? newProductForm.customCategory.trim()
-      : newProductForm.category.trim();
-
-    if (!trimmedName) {
-      setProductFormError('Ingresa el nombre del producto.');
-      return;
-    }
-    if (products.some((product) => (
-      product.storeId === targetStoreId
-      && product.name.trim().toLocaleLowerCase('es-MX') === trimmedName.toLocaleLowerCase('es-MX')
-    ))) {
-      setProductFormError(`Ya existe un producto llamado "${trimmedName}" en esta tienda.`);
-      return;
-    }
-
-    if (!finalCategory) {
-      setProductFormError('Ingresa o selecciona una categoría.');
-      return;
-    }
-
-    const currentStockNum = parseFloat(newProductForm.currentStock);
-    if (isNaN(currentStockNum) || currentStockNum < 0) {
-      setProductFormError('El stock inicial debe ser 0 o mayor.');
-      return;
-    }
-
-    const minStockNum = parseFloat(newProductForm.minStock);
-    if (isNaN(minStockNum) || minStockNum < 0) {
-      setProductFormError('El stock mínimo debe ser 0 o mayor.');
-      return;
-    }
-
-    const costNum = parseFloat(newProductForm.cost);
-    if (isNaN(costNum) || costNum < 0) {
-      setProductFormError('El costo por unidad debe ser 0 o mayor.');
-      return;
-    }
-
-    const priceNum = parseFloat(newProductForm.price);
-    if (isNaN(priceNum) || priceNum <= 0) {
-      setProductFormError('El precio de venta debe ser mayor a 0.');
-      return;
-    }
-
-    setProductFormError('');
-    setIsAddingProduct(true);
-
-    try {
-      await saveNewProduct({
-        name: trimmedName,
-        category: finalCategory,
-        currentStock: currentStockNum,
-        minStock: minStockNum,
-        unit: newProductForm.unit || 'L',
-        price: priceNum,
-        cost: costNum,
-        color: newProductForm.color || 'bg-cyan-500',
-      }, currentUser, targetStoreId);
-
-      setIsAddProductOpen(false);
-      setAddProductSuccess(`¡Producto "${trimmedName}" registrado con éxito!`);
-      setTimeout(() => setAddProductSuccess(''), 4000);
-    } catch (error) {
-      setProductFormError(error.message || 'No se pudo registrar el producto.');
-    } finally {
-      setIsAddingProduct(false);
     }
   };
 
@@ -1118,9 +1011,9 @@ export default function App() {
     setCashShiftModal(null);
     setCashShiftActionError('');
     setIsRestockOpen(false);
-    setIsAddProductOpen(false);
     setIsInventoryAuditOpen(false);
     setEditingMinStockProductId(null);
+    setEditingPriceProductId(null);
     setInventoryTargetStoreId(storeId || '');
     setActionError('');
     setSelectedStoreId(storeId || null);
@@ -1359,7 +1252,7 @@ export default function App() {
               <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/60 space-y-1 text-left">
                 <div className="flex items-center gap-2 text-cyan-400 text-xs font-semibold">
                   <Lock className="w-4 h-4" />
-                  <span>Acceso de Administrador</span>
+                  <span>Acceso con Google</span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
                   Inicia sesión con tu cuenta de Google autorizada.
@@ -1684,6 +1577,21 @@ export default function App() {
             >
               <Truck className="w-4 h-4" />
               <span>Compras</span>
+            </button>
+          )}
+
+          {canAccessPurchases && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('catalog')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                visibleTab === 'catalog'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Catálogo</span>
             </button>
           )}
 
@@ -2019,6 +1927,17 @@ export default function App() {
             activeStoreId={activeStoreId}
             stores={activeStores}
             products={products}
+            catalog={catalog}
+          />
+        )}
+
+        {visibleTab === 'catalog' && canAccessPurchases && (
+          <CatalogPanel
+            currentUser={currentUser}
+            catalog={catalog}
+            products={products}
+            stores={activeStores}
+            activeStoreId={activeStoreId}
           />
         )}
 
@@ -2111,14 +2030,6 @@ export default function App() {
                     <History className="w-4 h-4" />
                     <span>Historial</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenAddProduct}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <PlusCircle className="w-4 h-4" />
-                    <span>Nuevo Producto</span>
-                  </button>
                 </div>
               </div>
 
@@ -2142,16 +2053,20 @@ export default function App() {
                           <Package className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                           <p className="font-semibold text-slate-200 text-sm">No hay productos registrados en el inventario</p>
                           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                            Comienza agregando tus primeros productos, porrones o tanques de limpieza para iniciar el control.
+                            {isStoreManager
+                              ? 'Crea los productos en la pestaña Catálogo y habilítalos en esta tienda.'
+                              : 'Pide a un administrador o supervisor que habilite productos en esta tienda desde el Catálogo.'}
                           </p>
-                          <button
-                            type="button"
-                            onClick={handleOpenAddProduct}
-                            className="mt-4 inline-flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 cursor-pointer"
-                          >
-                            <PlusCircle className="w-4 h-4" />
-                            <span>Agregar Primer Producto</span>
-                          </button>
+                          {isStoreManager && (
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('catalog')}
+                              className="mt-4 inline-flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 cursor-pointer"
+                            >
+                              <Layers className="w-4 h-4" />
+                              <span>Ir al Catálogo</span>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ) : (
@@ -2274,7 +2189,68 @@ export default function App() {
                               )}
                             </td>
                             <td className="px-4 py-3 font-mono">{formatCurrency(p.cost)}</td>
-                            <td className="px-4 py-3 font-mono text-cyan-400 font-bold">{formatCurrency(p.price)}</td>
+                            <td className="px-4 py-3 font-mono text-cyan-400 font-bold">
+                              {isStoreManager && editingPriceProductId === p.id ? (
+                                <form onSubmit={(event) => handleSavePrice(event, p)} className="flex items-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min="0.01"
+                                    step="0.01"
+                                    aria-label={`Precio de venta de ${p.name}`}
+                                    value={priceDraft}
+                                    onChange={(event) => setPriceDraft(event.target.value)}
+                                    className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-cyan-300 focus:outline-none focus:border-cyan-400"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={isSavingPrice}
+                                    aria-label="Guardar precio de venta"
+                                    className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingPrice}
+                                    onClick={() => setEditingPriceProductId(null)}
+                                    aria-label="Cancelar edición del precio"
+                                    className="text-slate-400 hover:text-white disabled:opacity-50"
+                                  >
+                                    ✕
+                                  </button>
+                                </form>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span>{formatCurrency(p.price)}</span>
+                                  {(() => {
+                                    const level = getPriceLevel(p.price, p.cost);
+                                    if (!level) return null;
+                                    return (
+                                      <span
+                                        title={level.title}
+                                        aria-label={level.title}
+                                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${level.className}`}
+                                      >
+                                        {level.label}
+                                      </span>
+                                    );
+                                  })()}
+                                  {isStoreManager && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPriceProductId(p.id);
+                                        setPriceDraft(String(p.price));
+                                      }}
+                                      aria-label={`Editar precio de venta de ${p.name}`}
+                                      className="text-slate-500 hover:text-cyan-300"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
@@ -2798,262 +2774,6 @@ export default function App() {
                         className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
                       >
                         {isRestocking ? 'Guardando...' : 'Confirmar Entrada'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
-
-            {/* Modal for Add New Product */}
-            {isAddProductOpen && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
-                  <div className="flex justify-between items-center border-b border-slate-700 pb-3">
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <PlusCircle className="w-5 h-5 text-cyan-400" />
-                      Agregar Nuevo Producto
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={handleCloseAddProduct}
-                      className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer"
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {productFormError && (
-                    <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs">
-                      {productFormError}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleCreateProduct} className="space-y-4">
-                    {isGeneralView && (
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Tienda del producto: <span className="text-cyan-400">*</span>
-                        </label>
-                        <select
-                          required
-                          aria-label="Tienda del nuevo producto"
-                          value={inventoryTargetStoreId}
-                          onChange={(event) => setInventoryTargetStoreId(event.target.value)}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                        >
-                          <option value="">Selecciona una tienda</option>
-                          {activeStores.map((store) => (
-                            <option key={store.id} value={store.id}>{store.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {/* Nombre */}
-                    <div>
-                      <label className="text-xs text-slate-300 block mb-1 font-medium">
-                        Nombre del Producto: <span className="text-cyan-400">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Cloro Concentrado al 6%"
-                        required
-                        value={newProductForm.name}
-                        onChange={(e) => setNewProductForm(prev => ({ ...prev, name: e.target.value }))}
-                        className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                      />
-                    </div>
-
-                    {/* Categoría y Unidad */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Categoría: <span className="text-cyan-400">*</span>
-                        </label>
-                        <select
-                          value={newProductForm.category}
-                          onChange={(e) => setNewProductForm(prev => ({ ...prev, category: e.target.value }))}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                        >
-                          {availableCategories.map(cat => (
-                            <option key={cat} value={cat}>{cat}</option>
-                          ))}
-                          <option value="__custom__">+ Otra categoría...</option>
-                        </select>
-                        {newProductForm.category === '__custom__' && (
-                          <input
-                            type="text"
-                            placeholder="Nombre de la nueva categoría"
-                            required
-                            value={newProductForm.customCategory}
-                            onChange={(e) => setNewProductForm(prev => ({ ...prev, customCategory: e.target.value }))}
-                            className="mt-2 w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                          />
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Unidad de Medida:
-                        </label>
-                        <select
-                          value={newProductForm.unit}
-                          onChange={(e) => setNewProductForm(prev => ({ ...prev, unit: e.target.value }))}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                        >
-                          <option value="L">L (Litro)</option>
-                          <option value="Pza">Pza (Pieza)</option>
-                          <option value="Kg">Kg (Kilogramo)</option>
-                          <option value="Galón">Galón (3.785 L)</option>
-                          <option value="Porrón">Porrón (20 L)</option>
-                          <option value="Cubeta">Cubeta (19 L)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Stock Inicial y Stock Mínimo */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Stock Inicial ({newProductForm.unit}): <span className="text-cyan-400">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          required
-                          value={newProductForm.currentStock}
-                          onChange={(e) => setNewProductForm(prev => ({ ...prev, currentStock: e.target.value }))}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono font-bold text-cyan-400 focus:outline-none focus:border-cyan-400"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Stock Mínimo / Alerta ({newProductForm.unit}): <span className="text-cyan-400">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="10.00"
-                          required
-                          value={newProductForm.minStock}
-                          onChange={(e) => setNewProductForm(prev => ({ ...prev, minStock: e.target.value }))}
-                          readOnly={!isAdmin}
-                          className={`w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono text-amber-300 focus:outline-none focus:border-cyan-400 ${!isAdmin ? 'opacity-60' : ''}`}
-                        />
-                        {!isAdmin && (
-                          <p className="text-[10px] text-slate-500 mt-1">Solo un administrador puede cambiar este valor.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Costo y Precio de Venta */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1 font-medium">
-                          Costo por {newProductForm.unit} ($ MXN): <span className="text-cyan-400">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          required
-                          value={newProductForm.cost}
-                          onChange={(e) => handleCostChange(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono text-slate-200 focus:outline-none focus:border-cyan-400"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-300 font-medium block mb-1">
-                          Precio de Venta ($ MXN): <span className="text-cyan-400">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          placeholder="0.00"
-                          required
-                          value={newProductForm.price}
-                          onChange={(e) => handlePriceChange(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-cyan-400"
-                        />
-                        <p className="text-[10px] text-slate-400 mt-1">
-                          Calculado automáticamente para un margen de venta del 50% o editable manualmente.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Profit margin live preview */}
-                    {parseFloat(newProductForm.price) > 0 && parseFloat(newProductForm.cost) >= 0 && (() => {
-                      const costNum = parseFloat(newProductForm.cost) || 0;
-                      const priceNum = parseFloat(newProductForm.price);
-                      const profit = priceNum - costNum;
-                      const profitPercentOnCost = costNum > 0 ? (profit / costNum) * 100 : 0;
-                      const marginPercentOnSale = priceNum > 0 ? (profit / priceNum) * 100 : 0;
-
-                      return (
-                        <div className="bg-slate-900/80 border border-slate-700/80 p-3 rounded-xl text-xs space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400">Ganancia neta por {newProductForm.unit}:</span>
-                            <span className="font-mono font-bold text-emerald-400">
-                              +{formatCurrency(profit)} MXN
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800 pt-1.5">
-                            <span>Rendimiento de ganancia:</span>
-                            <span className={`font-mono font-semibold ${profitPercentOnCost >= 50 ? 'text-cyan-400' : 'text-slate-300'}`}>
-                              {profitPercentOnCost.toFixed(1)}% sobre costo ({marginPercentOnSale.toFixed(1)}% margen sobre venta)
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Color Identificador */}
-                    <div>
-                      <label className="text-xs text-slate-300 block mb-1.5 font-medium">
-                        Color Identificador en Catálogo:
-                      </label>
-                      <div className="flex flex-wrap gap-2 items-center">
-                        {PRODUCT_COLORS.map(col => (
-                          <button
-                            type="button"
-                            key={col.class}
-                            title={col.name}
-                            onClick={() => setNewProductForm(prev => ({ ...prev, color: col.class }))}
-                            className={`w-7 h-7 rounded-full ${col.class} transition-all cursor-pointer ${
-                              newProductForm.color === col.class
-                                ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-800 scale-110 shadow-lg'
-                                : 'opacity-70 hover:opacity-100 hover:scale-105'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Modal Buttons */}
-                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-700">
-                      <button
-                        type="button"
-                        onClick={handleCloseAddProduct}
-                        disabled={isAddingProduct}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isAddingProduct}
-                        className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <PlusCircle className="w-4 h-4" />
-                        {isAddingProduct ? 'Guardando...' : 'Guardar Producto'}
                       </button>
                     </div>
                   </form>

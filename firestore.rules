@@ -21,9 +21,17 @@ rules_version = '2';
 //   name, address?, phone?, status ('active'|'archived'), cashierIds: list<string>;
 //   openCashShiftCount: int (defaults to 0 and must be 0 when archived)
 //
-// Collection: products         Document ID: auto
-//   name, category, unit, color: string; currentStock, minStock, price, cost: number;
-//   storeId: string; createdBy: map; createdAt: timestamp; audit/restock metadata
+// Collection: catalogProducts   Document ID: auto (never deleted, only archived)
+//   name, category, unit, color: string; price: number (global default sale price);
+//   minStock?: number (default minimum stock suggested when enabling in a store);
+//   status: 'active'|'archived'; createdBy: map; createdAt, updatedAt: timestamp
+//   Written only by admins and supervisors; readable by any active staff.
+//
+// Collection: stockItems        Document ID: "<storeId>_<catalogId>"
+//   catalogId, storeId: string; currentStock, minStock, cost: number;
+//   priceOverride?: number|null (store-specific price, falls back to catalog price);
+//   createdBy: map; createdAt: timestamp; restock/min-stock audit metadata
+//   Only admins and supervisors enable a catalog product in a store.
 //
 // Collection: sales            Document ID: auto (immutable once created)
 //   ticketId, channel, paymentMethod, shiftId, cashierId: string; items: list;
@@ -373,24 +381,52 @@ service cloud.firestore {
         && (data.get('status', 'active') != 'archived' || data.get('cashierIds', []).size() == 0);
     }
 
-    function hasValidProductFields(data) {
+    function hasValidStockFields(data) {
+      return validText(data.catalogId, 100) && data.catalogId.size() > 0
+        && validNonNegative(data.currentStock)
+        && validNonNegative(data.minStock)
+        && validNonNegative(data.cost)
+        && (data.get('priceOverride', null) == null
+          || (validNonNegative(data.priceOverride) && data.priceOverride > 0))
+        && data.storeId is string && data.storeId.size() > 0 && data.storeId.size() <= 100;
+    }
+
+    function catalogPath(catalogId) {
+      return /databases/$(database)/documents/catalogProducts/$(catalogId);
+    }
+
+    function hasValidCatalogFields(data) {
       return validText(data.name, 120) && data.name.size() > 0
         && validText(data.category, 60) && data.category.size() > 0
         && validText(data.get('unit', 'L'), 10)
         && validText(data.get('color', ''), 40)
-        && validNonNegative(data.currentStock)
-        && validNonNegative(data.minStock)
-        && validNonNegative(data.cost)
         && validNonNegative(data.price) && data.price > 0
-        && data.storeId is string && data.storeId.size() > 0 && data.storeId.size() <= 100;
+        && validNonNegative(data.get('minStock', 0))
+        && data.status in ['active', 'archived'];
     }
 
-    function isNewProduct(data) {
-      return hasOnlyKeys(data, ['name', 'category', 'currentStock', 'minStock', 'unit',
-          'price', 'cost', 'color', 'createdBy', 'storeId', 'createdAt'])
-        && data.keys().hasAll(['name', 'category', 'currentStock', 'minStock', 'price', 'cost',
-          'createdBy', 'storeId', 'createdAt'])
-        && hasValidProductFields(data)
+    function isNewCatalogProduct(data) {
+      return hasOnlyKeys(data, ['name', 'category', 'unit', 'color', 'price', 'minStock', 'status',
+          'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['name', 'category', 'price', 'status', 'createdBy', 'createdAt',
+          'updatedAt'])
+        && hasValidCatalogFields(data)
+        && data.status == 'active'
+        && isOwnAuthorship(data.createdBy)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    // Stock documents use the deterministic ID "<storeId>_<catalogId>".
+    function isNewStockItem(stockId, data) {
+      return hasOnlyKeys(data, ['catalogId', 'storeId', 'currentStock', 'minStock', 'cost',
+          'priceOverride', 'createdBy', 'createdAt'])
+        && data.keys().hasAll(['catalogId', 'storeId', 'currentStock', 'minStock', 'cost',
+          'createdBy', 'createdAt'])
+        && hasValidStockFields(data)
+        && stockId == data.storeId + '_' + data.catalogId
+        && existsAfter(catalogPath(data.catalogId))
+        && getAfter(catalogPath(data.catalogId)).data.status == 'active'
         && isOwnAuthorship(data.createdBy)
         && data.createdAt == request.time;
     }
@@ -631,33 +667,46 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    match /products/{productId} {
+    // Central catalog: readable by any active staff, written only by admins and supervisors.
+    // Products are archived, never deleted.
+    match /catalogProducts/{catalogId} {
+      allow read: if isActiveStaff();
+      allow create: if isPurchasingStaff() && isNewCatalogProduct(request.resource.data);
+      allow update: if isPurchasingStaff()
+        && changedKeys().hasOnly(['name', 'category', 'unit', 'color', 'price', 'minStock', 'status',
+          'updatedAt'])
+        && hasValidCatalogFields(request.resource.data)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // Per-store stock (and optional own price) of a catalog product.
+    match /stockItems/{stockId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
 
-      allow create: if canOperateStore(request.resource.data.storeId)
-        && isNewProduct(request.resource.data);
+      allow create: if isPurchasingStaff()
+        && canOperateStore(request.resource.data.storeId)
+        && isNewStockItem(stockId, request.resource.data);
 
-      allow update: if (request.resource.data.storeId == resource.data.get('storeId', null)
+      allow update: if request.resource.data.storeId == resource.data.get('storeId', null)
+        && request.resource.data.catalogId == resource.data.get('catalogId', null)
         && canOperateStore(resource.data.get('storeId', null))
         && validNonNegative(request.resource.data.currentStock)
         && validNonNegative(request.resource.data.minStock)
         && (
           // Sales, restocks and audits adjust stock (and its audit trail) only.
           changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt'])
-          // Purchase receipts also refresh the unit cost and, optionally, the sale price.
+          // Purchase receipts also refresh the unit cost and, optionally, the store price.
           || (isPurchasingStaff()
-            && changedKeys().hasOnly(['currentStock', 'cost', 'price', 'lastRestockedBy',
+            && changedKeys().hasOnly(['currentStock', 'cost', 'priceOverride', 'lastRestockedBy',
               'lastRestockedAt'])
-            && validNonNegative(request.resource.data.cost)
-            && validNonNegative(request.resource.data.price)
-            && request.resource.data.price > 0)
-          // Only admins change catalog data and the alert threshold.
+            && hasValidStockFields(request.resource.data))
+          // Only admins change the alert threshold.
           || (isAdmin()
-            && changedKeys().hasOnly(['name', 'category', 'currentStock', 'minStock', 'unit',
-              'price', 'cost', 'color', 'storeId', 'lastRestockedBy', 'lastRestockedAt',
-              'minStockUpdatedBy', 'minStockUpdatedAt'])
-            && hasValidProductFields(request.resource.data))
-        ));
+            && changedKeys().hasOnly(['currentStock', 'minStock', 'cost', 'priceOverride',
+              'lastRestockedBy', 'lastRestockedAt', 'minStockUpdatedBy', 'minStockUpdatedAt'])
+            && hasValidStockFields(request.resource.data))
+        );
 
       allow delete: if isAdmin()
         && isActiveStore(resource.data.get('storeId', null))

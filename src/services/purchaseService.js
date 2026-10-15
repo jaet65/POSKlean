@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   query,
   runTransaction,
@@ -8,6 +9,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { normalizeProductName, stockItemId } from './catalogService';
 
 const MAX_LINES = 50;
 const MAX_TOTAL_CENTS = 99999999999;
@@ -70,7 +72,7 @@ export function subscribeToPurchaseOrders(storeIds, onData, onError) {
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
-export async function createPurchaseOrder({ storeId, supplier, lines, notes = '', products, user }) {
+export async function createPurchaseOrder({ storeId, supplier, lines, notes = '', products, catalog = [], user }) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if (!storeId) throw new Error('Selecciona una tienda para la orden de compra.');
   if (!supplier?.id || supplier.status === 'archived') {
@@ -84,6 +86,13 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
   const seen = new Set();
   const newProductNames = new Set();
   const newProducts = [];
+  const catalogByName = new Map();
+  if (lines.some((line) => line.newProduct)) {
+    const catalogSnapshot = await getDocs(collection(db, 'catalogProducts'));
+    catalogSnapshot.docs.forEach((item) => {
+      catalogByName.set(normalizeProductName(item.data().name), { id: item.id, ...item.data() });
+    });
+  }
   const items = lines.map((line) => {
     if (line.newProduct) {
       const draft = line.newProduct;
@@ -103,26 +112,41 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
       ));
       if (duplicated) throw new Error(`Ya existe un producto llamado "${name}" en esta tienda.`);
       newProductNames.add(normalizedName);
+      const existingCatalog = catalogByName.get(normalizedName);
+      if (existingCatalog?.status === 'archived') {
+        throw new Error(`"${name}" está archivado en el catálogo; restáuralo antes de comprarlo.`);
+      }
+      const isNewCatalog = !existingCatalog;
+      const catalogId = existingCatalog ? existingCatalog.id : doc(collection(db, 'catalogProducts')).id;
       if (!validQuantity(line.qty)) {
         throw new Error(`Cantidad no válida para ${name} (máximo dos decimales).`);
       }
       if (!validMoney(line.unitCost)) {
         throw new Error(`Costo no válido para ${name} (máximo dos decimales).`);
       }
-      const productRef = doc(collection(db, 'products'));
+      const productRef = doc(db, 'stockItems', stockItemId(storeId, catalogId));
       newProducts.push({
-        ref: productRef,
-        data: {
+        catalogRef: isNewCatalog ? doc(db, 'catalogProducts', catalogId) : null,
+        catalogData: {
           name,
           category,
+          unit,
+          color: 'bg-cyan-500',
+          price: draft.price,
+          status: 'active',
+          createdBy: { ...userInfo(user), userEmail: user?.email || '' },
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        ref: productRef,
+        data: {
+          catalogId,
+          storeId,
           currentStock: 0,
           minStock: 0,
-          unit,
-          price: draft.price,
           cost: line.unitCost,
-          color: 'bg-cyan-500',
+          priceOverride: null,
           createdBy: { ...userInfo(user), userEmail: user?.email || '' },
-          storeId,
           createdAt: serverTimestamp(),
         },
       });
@@ -130,6 +154,49 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
         productId: productRef.id,
         productName: name,
         unit,
+        qtyOrdered: line.qty,
+        qtyReceived: 0,
+        unitCostCents: toHundredths(line.unitCost),
+      };
+    }
+    const catalogItem = line.catalogId
+      ? catalog.find((candidate) => candidate.id === line.catalogId)
+      : null;
+    if (line.catalogId) {
+      if (!catalogItem || catalogItem.status === 'archived') {
+        throw new Error('Uno de los productos del catálogo ya no está disponible.');
+      }
+      if (products.some((candidate) => candidate.storeId === storeId && candidate.catalogId === catalogItem.id)) {
+        throw new Error(`${catalogItem.name} ya está habilitado en esta tienda.`);
+      }
+      if (seen.has(`catalog:${catalogItem.id}`)) throw new Error(`${catalogItem.name} está repetido en la orden.`);
+      seen.add(`catalog:${catalogItem.id}`);
+      if (!validQuantity(line.qty)) {
+        throw new Error(`Cantidad no válida para ${catalogItem.name} (máximo dos decimales).`);
+      }
+      if (!validMoney(line.unitCost)) {
+        throw new Error(`Costo no válido para ${catalogItem.name} (máximo dos decimales).`);
+      }
+      const productRef = doc(db, 'stockItems', stockItemId(storeId, catalogItem.id));
+      newProducts.push({
+        catalogRef: null,
+        catalogData: null,
+        ref: productRef,
+        data: {
+          catalogId: catalogItem.id,
+          storeId,
+          currentStock: 0,
+          minStock: 0,
+          cost: line.unitCost,
+          priceOverride: null,
+          createdBy: { ...userInfo(user), userEmail: user?.email || '' },
+          createdAt: serverTimestamp(),
+        },
+      });
+      return {
+        productId: productRef.id,
+        productName: catalogItem.name,
+        unit: catalogItem.unit || 'L',
         qtyOrdered: line.qty,
         qtyReceived: 0,
         unitCostCents: toHundredths(line.unitCost),
@@ -166,7 +233,10 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
   const orderRef = doc(collection(db, 'purchaseOrders'));
   const createdAt = serverTimestamp();
   await runTransaction(db, async (transaction) => {
-    newProducts.forEach(({ ref, data }) => transaction.set(ref, data));
+    newProducts.forEach(({ catalogRef, catalogData, ref, data }) => {
+      if (catalogRef) transaction.set(catalogRef, catalogData);
+      transaction.set(ref, data);
+    });
     transaction.set(orderRef, {
       storeId,
       supplierId: supplier.id,
@@ -236,7 +306,7 @@ export async function receivePurchaseOrder({ orderId, receipts, user }) {
       if (toHundredths(receipt.qty) > pendingHundredths) {
         throw new Error(`${item.productName}: recibes más de lo pendiente (${fromHundredths(pendingHundredths)} ${item.unit}).`);
       }
-      return { ...receipt, item, productRef: doc(db, 'products', item.productId) };
+      return { ...receipt, item, productRef: doc(db, 'stockItems', item.productId) };
     });
 
     const productSnapshots = await Promise.all(
@@ -267,7 +337,7 @@ export async function receivePurchaseOrder({ orderId, receipts, user }) {
         if (!validMoney(newPrice) || newPrice <= 0) {
           throw new Error(`Precio de venta no válido para ${item.productName}.`);
         }
-        productChanges.price = newPrice;
+        productChanges.priceOverride = newPrice;
       }
 
       transaction.update(productRef, productChanges);

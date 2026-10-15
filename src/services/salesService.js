@@ -41,7 +41,7 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
 
   const saleRef = doc(collection(db, 'sales'));
   const ticketId = `VTA-${saleRef.id.slice(0, 8).toUpperCase()}`;
-  const productRefs = [...quantitiesByProduct.keys()].map((id) => doc(db, 'products', id));
+  const productRefs = [...quantitiesByProduct.keys()].map((id) => doc(db, 'stockItems', id));
   const shiftRef = doc(db, 'cashShifts', shiftId);
   const registerRef = doc(db, 'cashRegisters', cashierId);
 
@@ -74,16 +74,31 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
       throw new Error('El resumen del turno tiene datos inválidos.');
     }
 
-    const productSnapshots = await Promise.all(
+    const stockSnapshots = await Promise.all(
       productRefs.map((productRef) => transaction.get(productRef)),
     );
-    const saleItems = productSnapshots.map((productSnapshot, index) => {
-      if (!productSnapshot.exists()) {
+    const catalogSnapshots = await Promise.all(stockSnapshots.map((stockSnapshot) => (
+      stockSnapshot.exists()
+        ? transaction.get(doc(db, 'catalogProducts', stockSnapshot.data().catalogId))
+        : null
+    )));
+    const saleItems = stockSnapshots.map((productSnapshot, index) => {
+      const catalogSnapshot = catalogSnapshots[index];
+      if (!productSnapshot.exists() || !catalogSnapshot?.exists()
+        || catalogSnapshot.data().status === 'archived') {
         throw new Error('Uno de los productos del carrito ya no existe. Actualiza el carrito e inténtalo de nuevo.');
       }
 
-      const product = productSnapshot.data();
+      const stock = productSnapshot.data();
+      const product = {
+        ...catalogSnapshot.data(),
+        currentStock: stock.currentStock,
+        price: Number.isFinite(stock.priceOverride) ? stock.priceOverride : catalogSnapshot.data().price,
+      };
       const qty = quantitiesByProduct.get(productRefs[index].id);
+      if (stock.storeId !== storeId) {
+        throw new Error(`El producto "${product.name}" no pertenece a esta tienda.`);
+      }
       if (!Number.isFinite(product.currentStock) || !Number.isFinite(product.price)) {
         throw new Error(`El producto "${product.name || productSnapshot.id}" tiene stock o precio inválido.`);
       }

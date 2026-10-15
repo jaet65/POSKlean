@@ -1,17 +1,19 @@
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
-  query,
   runTransaction,
   serverTimestamp,
   updateDoc,
-  where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import {
+  createCatalogProduct,
+  enableCatalogProductInStore,
+  findCatalogByName,
+  stockItemId,
+} from './catalogService';
 
 export async function deleteProduct(productId, user = null, storeId = null) {
   if (!db) {
@@ -24,7 +26,7 @@ export async function deleteProduct(productId, user = null, storeId = null) {
     throw new Error('El producto y la tienda son obligatorios.');
   }
 
-  const productRef = doc(db, 'products', productId);
+  const productRef = doc(db, 'stockItems', productId);
   const productSnapshot = await getDoc(productRef);
   if (!productSnapshot.exists()) {
     throw new Error('El producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
@@ -35,7 +37,7 @@ export async function deleteProduct(productId, user = null, storeId = null) {
     throw new Error('El producto no pertenece a la tienda seleccionada.');
   }
   if (Number(product.currentStock) !== 0) {
-    throw new Error('Solo se pueden eliminar productos con stock en 0.');
+    throw new Error('Solo se pueden quitar de la tienda productos con stock en 0.');
   }
 
   await deleteDoc(productRef);
@@ -87,20 +89,6 @@ export async function addProduct(productData, user = null, storeId = null) {
     throw new Error('El costo por unidad debe ser un número mayor o igual a 0.');
   }
 
-  const normalizedName = trimmedName.toLocaleLowerCase('es-MX');
-  const productsInStore = await getDocs(query(
-    collection(db, 'products'),
-    where('storeId', '==', storeId),
-  ));
-  const duplicateProduct = productsInStore.docs.some((productDoc) => {
-    const existingName = productDoc.data().name;
-    return typeof existingName === 'string'
-      && existingName.trim().toLocaleLowerCase('es-MX') === normalizedName;
-  });
-  if (duplicateProduct) {
-    throw new Error(`Ya existe un producto llamado "${trimmedName}" en esta tienda.`);
-  }
-
   const userInfo = {
     userId: user?.id || user?.uid || null,
     userName: user?.displayName || user?.username || user?.email || 'Desconocido',
@@ -108,37 +96,39 @@ export async function addProduct(productData, user = null, storeId = null) {
     userRole: user?.role || 'cajero',
   };
 
-  const newProduct = {
-    name: trimmedName,
-    category: trimmedCategory,
+  // Si el catálogo ya tiene el producto solo se habilita en la tienda; si no, se crea primero.
+  let catalogProduct = await findCatalogByName(trimmedName);
+  if (catalogProduct) {
+    const existingStock = await getDoc(doc(db, 'stockItems', stockItemId(storeId, catalogProduct.id)));
+    if (existingStock.exists()) {
+      throw new Error(`Ya existe un producto llamado "${trimmedName}" en esta tienda.`);
+    }
+  } else {
+    const catalogId = await createCatalogProduct({
+      name: trimmedName,
+      category: trimmedCategory,
+      unit: trimmedUnit,
+      color,
+      price: numPrice,
+    }, user);
+    catalogProduct = {
+      id: catalogId, name: trimmedName, unit: trimmedUnit, price: Number(numPrice.toFixed(2)),
+    };
+  }
+
+  const stockId = await enableCatalogProductInStore({
+    catalogProduct,
+    storeId,
     currentStock: Number(numCurrentStock.toFixed(2)),
     minStock: Number(numMinStock.toFixed(2)),
-    unit: trimmedUnit,
-    price: Number(numPrice.toFixed(2)),
     cost: Number(numCost.toFixed(2)),
-    color: color || 'bg-cyan-500',
-    createdBy: userInfo,
-    storeId,
-    createdAt: serverTimestamp(),
-  };
-
-  const docRef = await addDoc(collection(db, 'products'), newProduct);
-
-  await addDoc(collection(db, 'inventoryMovements'), {
-    type: 'initial',
-    productId: docRef.id,
-    productName: trimmedName,
-    unit: trimmedUnit,
-    amount: Number(numCurrentStock.toFixed(2)),
-    previousStock: 0,
-    newStock: Number(numCurrentStock.toFixed(2)),
-    referenceId: docRef.id,
-    createdBy: userInfo,
-    storeId,
-    timestamp: serverTimestamp(),
+    priceOverride: Number(numPrice.toFixed(2)) !== catalogProduct.price
+      ? Number(numPrice.toFixed(2))
+      : null,
+    user,
   });
 
-  return { id: docRef.id, ...newProduct };
+  return { id: stockId, storeId, catalogId: catalogProduct.id, name: trimmedName, createdBy: userInfo };
 }
 
 export async function restockProduct(productId, amount, user = null, storeId = null) {
@@ -157,7 +147,7 @@ export async function restockProduct(productId, amount, user = null, storeId = n
     userRole: user?.role || 'cajero',
   };
 
-  const productRef = doc(db, 'products', productId);
+  const productRef = doc(db, 'stockItems', productId);
   const movementRef = doc(collection(db, 'inventoryMovements'));
 
   await runTransaction(db, async (transaction) => {
@@ -166,8 +156,10 @@ export async function restockProduct(productId, amount, user = null, storeId = n
       throw new Error('El producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
     }
 
-    const productData = productSnapshot.data();
-    const currentStock = productData.currentStock;
+    const stockData = productSnapshot.data();
+    const catalogSnapshot = await transaction.get(doc(db, 'catalogProducts', stockData.catalogId));
+    const productData = catalogSnapshot.exists() ? catalogSnapshot.data() : {};
+    const currentStock = stockData.currentStock;
     if (!Number.isFinite(currentStock)) {
       throw new Error(`El producto ${productId} no tiene un currentStock numérico.`);
     }
@@ -196,7 +188,7 @@ export async function restockProduct(productId, amount, user = null, storeId = n
   });
 }
 
-export async function updateProductMinStock(productId, minStock, user = null, storeId = null) {
+export async function updateProductMinStock(productId, minStock, user = null) {
   if (!db) {
     throw new Error('No se puede actualizar el mínimo: configura primero Firebase.');
   }
@@ -208,8 +200,7 @@ export async function updateProductMinStock(productId, minStock, user = null, st
     throw new Error('Indica un mínimo de alerta válido con máximo dos decimales.');
   }
 
-  await updateDoc(doc(db, 'products', productId), {
-    storeId,
+  await updateDoc(doc(db, 'stockItems', productId), {
     minStock: Number(minStock.toFixed(2)),
     minStockUpdatedBy: {
       userId: user.id || user.uid || null,
@@ -251,17 +242,27 @@ export async function completeInventoryAudit({ counts, user = null, storeId = nu
   };
   const auditId = doc(collection(db, 'inventoryMovements')).id;
   const ticketId = `AUD-${auditId.slice(0, 8).toUpperCase()}`;
-  const productRefs = normalizedCounts.map(({ productId }) => doc(db, 'products', productId));
+  const productRefs = normalizedCounts.map(({ productId }) => doc(db, 'stockItems', productId));
   const movementRefs = normalizedCounts.map(() => doc(collection(db, 'inventoryMovements')));
 
   return runTransaction(db, async (transaction) => {
     const snapshots = await Promise.all(productRefs.map((productRef) => transaction.get(productRef)));
+    const catalogSnapshots = await Promise.all(snapshots.map((snapshot) => (
+      snapshot.exists() ? transaction.get(doc(db, 'catalogProducts', snapshot.data().catalogId)) : null
+    )));
     const lines = snapshots.map((snapshot, index) => {
-      if (!snapshot.exists()) {
+      if (!snapshot.exists() || !catalogSnapshots[index]?.exists()) {
         throw new Error('Un producto ya no existe. Actualiza el inventario e inténtalo de nuevo.');
       }
 
-      const product = snapshot.data();
+      const catalogData = catalogSnapshots[index].data();
+      const product = {
+        ...catalogData,
+        ...snapshot.data(),
+        price: Number.isFinite(snapshot.data().priceOverride)
+          ? snapshot.data().priceOverride
+          : catalogData.price,
+      };
       const expectedStock = product.currentStock;
       if (!Number.isFinite(expectedStock)) {
         throw new Error(`El producto ${product.name || snapshot.id} tiene stock esperado inválido.`);

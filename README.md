@@ -6,19 +6,7 @@ Aplicación de punto de venta e inventario con React, Vite y Firebase Firestore.
 
 1. En Firebase Console, registra una aplicación web para el proyecto `posklean` (o el proyecto que vayas a usar) y copia su configuración del SDK web.
 2. Copia `.env.example` a `.env.local` y completa las variables `VITE_FIREBASE_*` con esos valores. La configuración web identifica el proyecto, pero no sustituye las reglas de seguridad de Firestore.
-3. En Firestore crea documentos en la colección `products`. El ID de cada documento se usa como ID del producto. Cada producto necesita estos campos:
-
-   ```text
-   name: string
-   category: string
-   currentStock: number
-   minStock: number
-   unit: string (por ejemplo, "L")
-   price: number
-   cost: number
-   color: string (clase de color de Tailwind usada por la tarjeta)
-   ```
-
+3. Los productos se gestionan desde la pestaña **Catálogo** (administradores y supervisores): no hace falta crear documentos a mano. El catálogo central vive en `catalogProducts` (nombre, categoría, unidad, precio global, estado) y las existencias por sucursal en `stockItems` (ID `<storeId>_<catalogId>`: stock, mínimo, costo y `priceOverride` opcional). Los datos de la antigua colección `products` no se migran.
 4. Habilita **Authentication → Email/Password** y **Google** en la consola de Firebase y publica las reglas con `npx firebase-tools deploy --only firestore:rules` (archivo `firestore.rules`). Las reglas exigen sesión de Firebase y autorizan según el perfil `users/{uid}` (rol, estado y tienda).
 5. Ejecuta `npm install` y luego `npm run dev`.
 
@@ -30,11 +18,15 @@ Aplicación de punto de venta e inventario con React, Vite y Firebase Firestore.
 - Las cuentas de Google no se pre-registran: inician sesión, quedan **Pendientes** y un administrador las aprueba. El administrador principal se identifica por su cuenta de Google verificada.
 - Usuarios creados antes de esta migración (con hash local) no pueden iniciar sesión; vuelve a crearlos con el mismo nombre de usuario para reemplazarlos.
 
-La pantalla escucha `products` y `sales` en tiempo real. No crea inventario ni tickets de ejemplo; al comienzo, las colecciones deben estar cargadas con los datos reales del local.
+La pantalla escucha `catalogProducts`, `stockItems` y `sales` en tiempo real y fusiona catálogo y existencias en cada producto visible (precio = precio propio de la tienda o, si no tiene, el global). No crea inventario ni tickets de ejemplo.
+
+### Catálogo central y existencias por sucursal
+
+Un producto se define una sola vez en el catálogo y se "habilita" en cada tienda con su stock inicial, mínimo y costo. Administradores y supervisores crean y editan el catálogo y fijan un precio propio por tienda (vacío = precio global); los productos se archivan (solo sin existencias) en lugar de borrarse. Al recibir una compra, el precio aceptado se guarda como precio propio de esa tienda. Quitar un producto de una tienda (stock 0) borra solo sus existencias en esa tienda. Crear un producto desde Inventario o desde una orden de compra reutiliza el del catálogo si el nombre ya existe.
 
 ## Operaciones de venta e inventario
 
-`src/services/inventoryService.js` gestiona tanto el alta de nuevos productos (`addProduct`) como el resurtido de existencias (`restockProduct`). Desde la pestaña de **Inventario** se pueden registrar nuevos productos directamente a través del botón **"Nuevo Producto"**, especificando nombre, categoría, unidad, stock inicial, stock de alerta mínima, costo, precio de venta y color identificador. El stock se actualiza mediante transacciones de Firestore para prevenir sobreescrituras concurrentes y los cambios se reflejan en tiempo real con `onSnapshot()`.
+`src/services/inventoryService.js` gestiona tanto el alta de nuevos productos (`addProduct`) como el resurtido de existencias (`restockProduct`). Los productos nuevos se crean desde la pestaña **Catálogo** (administradores y supervisores) con el botón de nuevo producto: nombre, categoría, unidad, color y precio de venta, y opcionalmente se habilitan en una tienda con stock inicial, mínimo y costo (precio sugerido con 50% de margen). Inventario ya no crea productos; muestra y resurte las existencias de la tienda. El stock se actualiza mediante transacciones de Firestore para prevenir sobreescrituras concurrentes y los cambios se reflejan en tiempo real con `onSnapshot()`.
 
 `src/services/salesService.js` procesa cada cobro en una transacción: lee los productos, verifica que existan y que tengan stock suficiente, calcula el precio desde Firestore, descuenta `currentStock` y crea un ticket en `sales` como una sola operación atómica. Las ventas guardan cantidades y precios de cada artículo junto con el canal, el total y una marca de tiempo del servidor.
 

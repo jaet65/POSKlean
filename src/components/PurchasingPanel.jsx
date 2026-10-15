@@ -25,6 +25,7 @@ const STATUS_LABELS = {
 
 const EMPTY_SUPPLIER = { name: '', contactName: '', phone: '', email: '', notes: '' };
 const NEW_PRODUCT = '__new__';
+const CATALOG_PREFIX = 'catalog:';
 const CUSTOM_CATEGORY = '__custom__';
 const EMPTY_NEW_PRODUCT = { name: '', category: '', customCategory: '', unit: 'L', price: '', priceAuto: true };
 const UNIT_OPTIONS = ['L', 'Pza', 'Kg', 'Galón', 'Porrón', 'Cubeta'];
@@ -61,7 +62,7 @@ function Modal({ title, subtitle, onClose, busy, children, wide = false }) {
   );
 }
 
-export default function PurchasingPanel({ currentUser, activeStoreId, stores = [], products }) {
+export default function PurchasingPanel({ currentUser, activeStoreId, stores = [], products, catalog = [] }) {
   const [section, setSection] = useState('orders');
   const [suppliers, setSuppliers] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -102,10 +103,16 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
       .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es')),
     [products, orderForm.storeId],
   );
+  const catalogOptions = useMemo(() => {
+    const enabled = new Set(storeProducts.map((product) => product.catalogId));
+    return catalog
+      .filter((item) => item.status !== 'archived' && !enabled.has(item.id))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'));
+  }, [catalog, storeProducts]);
   const categories = useMemo(
-    () => [...new Set(storeProducts.map((product) => String(product.category || '').trim()).filter(Boolean))]
+    () => [...new Set([...storeProducts, ...catalog].map((product) => String(product.category || '').trim()).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'es')),
-    [storeProducts],
+    [storeProducts, catalog],
   );
 
   const run = async (task, successMessage) => {
@@ -158,11 +165,15 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
 
   const handleProductPick = (index, productId) => {
     if (productId === NEW_PRODUCT) {
-      updateLine(index, { productId: '', unitCost: '', newProduct: { ...EMPTY_NEW_PRODUCT, category: categories[0] || '' } });
+      updateLine(index, { productId: '', catalogId: '', unitCost: '', newProduct: { ...EMPTY_NEW_PRODUCT, category: categories[0] || '' } });
+      return;
+    }
+    if (productId.startsWith(CATALOG_PREFIX)) {
+      updateLine(index, { productId: '', catalogId: productId.slice(CATALOG_PREFIX.length), newProduct: null, unitCost: '' });
       return;
     }
     const product = products.find((candidate) => candidate.id === productId);
-    updateLine(index, { productId, newProduct: null, unitCost: product ? String(product.cost ?? '') : '' });
+    updateLine(index, { productId, catalogId: '', newProduct: null, unitCost: product ? String(product.cost ?? '') : '' });
   };
 
   const updateNewProduct = (index, changes) => {
@@ -206,9 +217,11 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
         supplier,
         notes: orderForm.notes,
         products,
+        catalog,
         user: currentUser,
         lines: orderForm.lines.map((line) => ({
           productId: line.productId,
+          catalogId: line.catalogId || '',
           qty: Number(line.qty),
           unitCost: Number(line.unitCost),
           newProduct: line.newProduct
@@ -353,7 +366,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           <button
             type="button"
             onClick={openOrderModal}
-            disabled={stores.length === 0 || activeSuppliers.length === 0 || products.length === 0}
+            disabled={stores.length === 0 || activeSuppliers.length === 0 || (products.length === 0 && catalog.length === 0)}
             className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" /> Nueva orden
@@ -613,7 +626,6 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
               </div>
             </div>
             <div className="space-y-2">
-              <p className={labelClass}>Productos</p>
               <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem_2.25rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                 <span>Producto</span>
                 <span>Cantidad</span>
@@ -622,19 +634,32 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
               </div>
               {orderForm.lines.map((line, index) => {
                 const chosen = new Set(orderForm.lines.map((other) => other.productId));
-                const product = products.find((candidate) => candidate.id === line.productId);
+                const chosenCatalog = new Set(orderForm.lines.map((other) => other.catalogId).filter(Boolean));
+                const product = products.find((candidate) => candidate.id === line.productId)
+                  || catalog.find((candidate) => candidate.id === line.catalogId);
                 return (
                   <div key={index} className="space-y-2">
                   <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem_2.25rem] items-center gap-2">
                     <div>
-                      <select aria-label="Producto" required disabled={!orderForm.storeId} value={line.newProduct ? NEW_PRODUCT : line.productId} onChange={(event) => handleProductPick(index, event.target.value)} className={inputClass}>
+                      <select aria-label="Producto" required disabled={!orderForm.storeId} value={line.newProduct ? NEW_PRODUCT : (line.catalogId ? `${CATALOG_PREFIX}${line.catalogId}` : line.productId)} onChange={(event) => handleProductPick(index, event.target.value)} className={inputClass}>
                         <option value="">{orderForm.storeId ? 'Producto' : 'Elige tienda primero'}</option>
                         <option value={NEW_PRODUCT}>+ Producto nuevo…</option>
-                        {storeProducts.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id} disabled={chosen.has(candidate.id) && candidate.id !== line.productId}>
-                            {candidate.name}
-                          </option>
-                        ))}
+                        <optgroup label="En esta tienda">
+                          {storeProducts.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id} disabled={chosen.has(candidate.id) && candidate.id !== line.productId}>
+                              {candidate.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                        {catalogOptions.length > 0 && (
+                          <optgroup label="Del catálogo (se habilita en la tienda)">
+                            {catalogOptions.map((candidate) => (
+                              <option key={candidate.id} value={`${CATALOG_PREFIX}${candidate.id}`} disabled={chosenCatalog.has(candidate.id) && candidate.id !== line.catalogId}>
+                                {candidate.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </div>
                     <input aria-label="Cantidad" required type="number" min="0.01" step="0.01" placeholder={line.newProduct?.unit || product?.unit || '0'} value={line.qty} onChange={(event) => updateLine(index, { qty: event.target.value })} className={inputClass} />
