@@ -504,7 +504,8 @@ service cloud.firestore {
     }
 
     function isValidMovement(data) {
-      return data.type in ['sale', 'restock', 'initial', 'audit', 'purchase']
+      return data.type in ['sale', 'restock', 'initial', 'audit', 'purchase',
+         'transfer_out', 'transfer_in']
         && validText(data.get('productId', ''), 100) && data.get('productId', '') != ''
         && validText(data.get('productName', ''), 120)
         && validText(data.get('unit', 'L'), 10)
@@ -726,7 +727,9 @@ service cloud.firestore {
       allow create: if canOperateStore(request.resource.data.storeId)
         && isValidMovement(request.resource.data)
         && (request.resource.data.type != 'audit' || isAdmin())
-        && (request.resource.data.type != 'purchase' || isPurchasingStaff());
+        && (request.resource.data.type != 'purchase' || isPurchasingStaff())
+        && (!(request.resource.data.type in ['transfer_out', 'transfer_in'])
+          || isPurchasingStaff());
       allow update, delete: if false;
     }
 

@@ -45,6 +45,7 @@ import {
 } from './services/inventoryService';
 import { createSale } from './services/salesService';
 import { setStorePriceOverride } from './services/catalogService';
+import { transferInventory } from './services/transferService';
 import { closeCashShift, openCashShift } from './services/cashShiftService';
 import {
   DEFAULT_PERMISSIONS,
@@ -144,6 +145,10 @@ export default function App() {
   const [inventoryTargetStoreId, setInventoryTargetStoreId] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
   const [isInventoryAuditOpen, setIsInventoryAuditOpen] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [transferForm, setTransferForm] = useState({ sourceStoreId: '', stockId: '', destStoreId: '', amount: '' });
+  const [transferError, setTransferError] = useState('');
+  const [isTransferring, setIsTransferring] = useState(false);
   const [showPreviousAuditTickets, setShowPreviousAuditTickets] = useState(false);
   const [inventoryAuditCounts, setInventoryAuditCounts] = useState({});
   const [isSavingInventoryAudit, setIsSavingInventoryAudit] = useState(false);
@@ -708,6 +713,49 @@ export default function App() {
       setActionError(error.message || 'No se pudo eliminar el producto.');
     } finally {
       setDeletingProductId(null);
+    }
+  };
+
+  const handleOpenTransfer = () => {
+    setTransferForm({
+      sourceStoreId: isGeneralView ? '' : activeStoreId || '',
+      stockId: '',
+      destStoreId: '',
+      amount: '',
+    });
+    setTransferError('');
+    setIsTransferOpen(true);
+  };
+
+  const handleSubmitTransfer = async (event) => {
+    event.preventDefault();
+    if (isTransferring) return;
+    const source = products.find((product) => product.id === transferForm.stockId);
+    const amount = Number(transferForm.amount);
+    if (!source || !transferForm.destStoreId) {
+      setTransferError('Selecciona el producto y la tienda destino.');
+      return;
+    }
+    if (!(amount > 0) || amount > Number(source.currentStock)) {
+      setTransferError(`Indica una cantidad entre 0 y ${source.currentStock}.`);
+      return;
+    }
+    setIsTransferring(true);
+    setTransferError('');
+    try {
+      await transferInventory({
+        sourceStockId: source.id,
+        destStoreId: transferForm.destStoreId,
+        amount,
+        user: currentUser,
+      });
+      setIsTransferOpen(false);
+      setAddProductSuccess(`Transferencia de "${source.name}" a ${storeNameById.get(transferForm.destStoreId) || 'la tienda destino'} completada.`);
+      setTimeout(() => setAddProductSuccess(''), 4000);
+    } catch (error) {
+      setTransferError(error.message || 'No se pudo completar la transferencia.');
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -2012,6 +2060,16 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {isStoreManager && activeStores.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleOpenTransfer}
+                      className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-cyan-500/30"
+                    >
+                      <ArrowLeftRight className="w-4 h-4" />
+                      <span>Transferir</span>
+                    </button>
+                  )}
                   {isAdmin && (
                     <button
                       type="button"
@@ -2318,6 +2376,8 @@ export default function App() {
                         <option value="purchase">Compra a proveedor</option>
                         <option value="sale">Venta</option>
                         <option value="audit">Auditoría</option>
+                        <option value="transfer_out">Transferencia enviada</option>
+                        <option value="transfer_in">Transferencia recibida</option>
                       </select>
                     </div>
                     {movements.length === 0 ? (
@@ -2338,7 +2398,12 @@ export default function App() {
                           </thead>
                           <tbody className="divide-y divide-slate-700/60">
                             {filteredMovements.map((movement) => {
-                              const movementLabel = movement.type === 'restock'
+                              const counterpartName = storeNameById.get(movement.counterpartStoreId) || 'otra tienda';
+                              const movementLabel = movement.type === 'transfer_out'
+                                ? `Transferencia a ${counterpartName}`
+                                : movement.type === 'transfer_in'
+                                  ? `Transferencia de ${counterpartName}`
+                                  : movement.type === 'restock'
                                 ? 'Resurtido'
                                 : movement.type === 'purchase'
                                   ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
@@ -2375,6 +2440,103 @@ export default function App() {
                     )}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {isTransferOpen && isStoreManager && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+                <form onSubmit={handleSubmitTransfer} className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl space-y-4">
+                  <h3 className="flex items-center gap-2 text-base font-bold text-white">
+                    <ArrowLeftRight className="h-5 w-5 text-cyan-400" />
+                    Transferir inventario
+                  </h3>
+                  <div>
+                    <label htmlFor="transfer-source" className="block text-xs font-semibold text-slate-400 mb-1">Tienda origen</label>
+                    <select
+                      id="transfer-source"
+                      value={transferForm.sourceStoreId}
+                      onChange={(event) => setTransferForm({ sourceStoreId: event.target.value, stockId: '', destStoreId: '', amount: '' })}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="">Selecciona la tienda origen</option>
+                      {activeStores
+                        .filter((store) => (isGeneralView
+                          ? products.some((product) => product.storeId === store.id)
+                          : store.id === activeStoreId))
+                        .map((store) => (
+                          <option key={store.id} value={store.id}>{store.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="transfer-product" className="block text-xs font-semibold text-slate-400 mb-1">Producto</label>
+                    <select
+                      id="transfer-product"
+                      value={transferForm.stockId}
+                      disabled={!transferForm.sourceStoreId}
+                      onChange={(event) => setTransferForm((form) => ({ ...form, stockId: event.target.value, amount: '' }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                    >
+                      <option value="">Selecciona un producto</option>
+                      {products
+                        .filter((product) => (product.storeId || activeStoreId) === transferForm.sourceStoreId && Number(product.currentStock) > 0)
+                        .map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name} ({product.currentStock} {product.unit})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="transfer-dest" className="block text-xs font-semibold text-slate-400 mb-1">Tienda destino</label>
+                    <select
+                      id="transfer-dest"
+                      value={transferForm.destStoreId}
+                      disabled={!transferForm.sourceStoreId}
+                      onChange={(event) => setTransferForm((form) => ({ ...form, destStoreId: event.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="">Selecciona la tienda</option>
+                      {activeStores
+                        .filter((store) => store.id !== transferForm.sourceStoreId)
+                        .map((store) => (
+                          <option key={store.id} value={store.id}>{store.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="transfer-amount" className="block text-xs font-semibold text-slate-400 mb-1">Cantidad a transferir</label>
+                    <input
+                      id="transfer-amount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={transferForm.amount}
+                      onChange={(event) => setTransferForm((form) => ({ ...form, amount: event.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Si el producto no existe en la tienda destino, se habilita con el costo del origen; si existe, se promedia el costo por cantidad.
+                  </p>
+                  {transferError && <p className="text-xs text-red-400">{transferError}</p>}
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsTransferOpen(false)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-100 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isTransferring}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isTransferring ? 'Transfiriendo...' : 'Transferir'}
+                    </button>
+                  </div>
+                </form>
               </div>
             )}
 
