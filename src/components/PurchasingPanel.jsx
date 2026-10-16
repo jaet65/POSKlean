@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { PackagePlus, Plus, Trash2, Truck, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, PackagePlus, Plus, Trash2, Truck, Upload, Users, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
+import { parsePurchaseOrderCsv, PURCHASE_ORDER_CSV_TEMPLATE } from '../utils/purchaseOrderCsv';
 import {
   addSupplier,
   setSupplierStatus,
@@ -9,6 +10,7 @@ import {
 } from '../services/supplierService';
 import {
   cancelPurchaseOrder,
+  closePartialPurchaseOrder,
   createPurchaseOrder,
   receivePurchaseOrder,
   subscribeToPurchaseOrders,
@@ -20,6 +22,7 @@ const STATUS_LABELS = {
   pending: { label: 'Pendiente', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
   partial: { label: 'Recibida parcial', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
   received: { label: 'Recibida', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  closed: { label: 'Cerrada parcial', className: 'bg-slate-600/30 text-slate-300 border-slate-600' },
   cancelled: { label: 'Cancelada', className: 'bg-slate-600/30 text-slate-400 border-slate-600' },
 };
 
@@ -74,6 +77,8 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const [supplierModal, setSupplierModal] = useState(null); // { id?, ...fields }
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [orderForm, setOrderForm] = useState({ storeId: '', supplierId: '', notes: '', lines: [] });
+  const [csvImportReport, setCsvImportReport] = useState(null);
+  const orderCsvInputRef = useRef(null);
   const [receiveModal, setReceiveModal] = useState(null); // { order, inputs }
   const [expandedOrderId, setExpandedOrderId] = useState(null);
 
@@ -170,9 +175,68 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
 
   const openOrderModal = () => {
     setActionError('');
+    setCsvImportReport(null);
     const defaultStoreId = activeStoreId || (stores.length === 1 ? stores[0].id : '');
     setOrderForm({ storeId: defaultStoreId, supplierId: '', notes: '', lines: [{ productId: '', qty: '', unitCost: '' }] });
     setOrderModalOpen(true);
+  };
+
+  const downloadOrderTemplate = () => {
+    const url = URL.createObjectURL(new Blob([`\uFEFF${PURCHASE_ORDER_CSV_TEMPLATE}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'plantilla-orden-compra.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleOrderCsvFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setActionError('');
+    if (file.size > 1024 * 1024) {
+      setCsvImportReport({ imported: 0, errors: [{ line: 0, message: 'El archivo CSV es demasiado grande (máximo 1 MB).' }] });
+      return;
+    }
+
+    const parsed = parsePurchaseOrderCsv(await file.text());
+    const errors = [...parsed.errors];
+    const candidates = [
+      ...storeProducts.map((product) => ({ ...product, productId: product.id, orderCatalogId: '', supplierCatalogId: product.catalogId })),
+      ...catalogOptions.map((item) => ({ ...item, productId: '', orderCatalogId: item.id, supplierCatalogId: item.id })),
+    ];
+    const normalizedName = (value) => String(value || '').trim().toLocaleLowerCase('es-MX');
+    const lines = [];
+    let importedSupplierId = '';
+
+    parsed.rows.forEach((row) => {
+      const matches = candidates.filter((candidate) => normalizedName(candidate.name) === normalizedName(row.name));
+      if (matches.length !== 1) {
+        errors.push({ line: row.line, message: matches.length ? 'El nombre coincide con más de un producto.' : `No se encontró "${row.name}" en esta tienda ni en el catálogo disponible.` });
+        return;
+      }
+      const candidate = matches[0];
+      const supplierId = catalogById.get(candidate.supplierCatalogId)?.supplierId;
+      if (!supplierId || !activeSuppliers.some((supplier) => supplier.id === supplierId)) {
+        errors.push({ line: row.line, message: `"${row.name}" no tiene un proveedor activo asignado.` });
+        return;
+      }
+      if (importedSupplierId && supplierId !== importedSupplierId) {
+        errors.push({ line: row.line, message: 'La orden solo puede incluir productos del mismo proveedor.' });
+        return;
+      }
+      importedSupplierId = supplierId;
+      lines.push({
+        productId: candidate.productId,
+        catalogId: candidate.orderCatalogId,
+        qty: String(row.qty),
+        unitCost: String(row.unitCost),
+      });
+    });
+
+    if (lines.length > 0) setOrderForm((previous) => ({ ...previous, lines, supplierId: importedSupplierId }));
+    setCsvImportReport({ imported: lines.length, errors });
   };
 
   const updateLine = (index, changes) => {
@@ -353,6 +417,15 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const handleCancelOrder = async (order) => {
     if (!window.confirm(`¿Cancelar la orden ${order.orderNumber}? Esta acción no se puede deshacer.`)) return;
     await run(() => cancelPurchaseOrder(order.id, currentUser), 'Orden cancelada.');
+  };
+
+  const handleClosePartialOrder = async (order) => {
+    const pendingItems = order.items
+      .filter((item) => pendingQty(item) > 0)
+      .map((item) => `${item.productName}: ${pendingQty(item)} ${item.unit}`)
+      .join('\n');
+    if (!window.confirm(`¿Cerrar la orden ${order.orderNumber}? Ya no podrás registrar la mercancía pendiente.\n\nPendiente:\n${pendingItems}`)) return;
+    await run(() => closePartialPurchaseOrder(order.id, currentUser), 'Orden cerrada con recepción parcial.');
   };
 
   const handleToggleSupplier = async (supplier) => {
@@ -542,6 +615,16 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                         Cancelar orden
                       </button>
                     )}
+                    {order.status === 'partial' && (
+                      <button
+                        type="button"
+                        onClick={() => handleClosePartialOrder(order)}
+                        disabled={busy}
+                        className="rounded-lg border border-slate-500 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        Cerrar orden
+                      </button>
+                    )}
                   </div>
                   {isOpen && (
                     <div className="mt-3 overflow-x-auto">
@@ -625,11 +708,14 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                   id="order-store"
                   required
                   value={orderForm.storeId}
-                  onChange={(event) => setOrderForm({
-                    ...orderForm,
-                    storeId: event.target.value,
-                    lines: [{ productId: '', qty: '', unitCost: '' }],
-                  })}
+                  onChange={(event) => {
+                    setOrderForm({
+                      ...orderForm,
+                      storeId: event.target.value,
+                      lines: [{ productId: '', qty: '', unitCost: '' }],
+                    });
+                    setCsvImportReport(null);
+                  }}
                   className={inputClass}
                 >
                   <option value="">Selecciona una tienda</option>
@@ -651,6 +737,28 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
               </div>
             </div>
             <div className="space-y-2">
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={downloadOrderTemplate} className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700">
+                  <Download className="h-3.5 w-3.5" /> Plantilla CSV
+                </button>
+                <button type="button" onClick={() => orderCsvInputRef.current?.click()} disabled={!orderForm.storeId || busy} className="flex items-center gap-1.5 rounded-lg border border-cyan-500/40 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50">
+                  <Upload className="h-3.5 w-3.5" /> Importar CSV
+                </button>
+                <input ref={orderCsvInputRef} type="file" accept=".csv,text/csv" onChange={handleOrderCsvFile} className="hidden" aria-label="Archivo CSV de la orden de compra" />
+              </div>
+              {csvImportReport && (
+                <div role="status" className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
+                  <p>{csvImportReport.imported} producto(s) importado(s){csvImportReport.errors.length ? `; ${csvImportReport.errors.length} fila(s) omitida(s)` : '.'}</p>
+                  {csvImportReport.errors.length > 0 && (
+                    <ul className="mt-1 list-inside list-disc space-y-0.5 text-rose-300">
+                      {csvImportReport.errors.slice(0, 10).map((item) => (
+                        <li key={`${item.line}-${item.message}`}>{item.line ? `Fila ${item.line}: ` : ''}{item.message}</li>
+                      ))}
+                      {csvImportReport.errors.length > 10 && <li>Y {csvImportReport.errors.length - 10} error(es) más.</li>}
+                    </ul>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem_2.25rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                 <span>Producto</span>
                 <span>Cantidad</span>

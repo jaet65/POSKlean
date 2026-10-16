@@ -59,10 +59,10 @@ rules_version = '2';
 //
 // Collection: purchaseOrders    Document ID: auto
 //   storeId, supplierId, supplierName, orderNumber: string;
-//   status: 'pending'|'partial'|'received'|'cancelled';
+//   status: 'pending'|'partial'|'received'|'closed'|'cancelled';
 //   items: list of {productId, productName, unit, qtyOrdered, qtyReceived, unitCostCents};
 //   totalCents, receivedCents: int; notes?: string; createdBy: map;
-//   createdAt, updatedAt: timestamp; receivedAt?, cancelledAt?: timestamp
+//   createdAt, updatedAt: timestamp; receivedAt?, closedAt?, cancelledAt?: timestamp
 //   Only admins and supervisors read or write suppliers and purchase orders.
 //
 // Known limits: stock/price numbers written by the client cannot be fully
@@ -593,6 +593,15 @@ service cloud.firestore {
         && isOwnAuthorship(newData.cancelledBy);
     }
 
+    function isPartialPurchaseOrderClosure(oldData, newData) {
+      return oldData.status == 'partial'
+        && newData.status == 'closed'
+        && changedKeys().hasOnly(['status', 'updatedAt', 'closedAt', 'closedBy'])
+        && newData.updatedAt == request.time
+        && newData.closedAt == request.time
+        && isOwnAuthorship(newData.closedBy);
+    }
+
     // ===============================================================
     // Rules (everything not matched below is denied)
     // ===============================================================
@@ -751,7 +760,8 @@ service cloud.firestore {
       allow update: if isPurchasingStaff()
         && canOperateStore(resource.data.get('storeId', null))
         && (isPurchaseOrderReceipt(resource.data, request.resource.data)
-          || isPurchaseOrderCancellation(resource.data, request.resource.data));
+          || isPurchaseOrderCancellation(resource.data, request.resource.data)
+          || isPartialPurchaseOrderClosure(resource.data, request.resource.data));
       allow delete: if false;
     }
   }

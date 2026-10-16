@@ -1297,16 +1297,6 @@ export default function App() {
             </form>
           ) : (
             <div className="space-y-4 text-center">
-              <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/60 space-y-1 text-left">
-                <div className="flex items-center gap-2 text-cyan-400 text-xs font-semibold">
-                  <Lock className="w-4 h-4" />
-                  <span>Acceso con Google</span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Inicia sesión con tu cuenta de Google autorizada.
-                </p>
-              </div>
-
               <button
                 onClick={handleGoogleLogin}
                 disabled={isLoggingIn}

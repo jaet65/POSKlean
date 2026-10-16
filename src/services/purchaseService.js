@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { normalizeProductName, stockItemId } from './catalogService';
 
 const MAX_LINES = 50;
+const MAX_STOCK_ITEMS_PER_COMMIT = 8;
 const MAX_TOTAL_CENTS = 99999999999;
 
 const userInfo = (user) => ({
@@ -112,16 +113,38 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
         throw new Error(`El precio de venta de ${name} debe ser mayor a 0 (máximo dos decimales).`);
       }
       const normalizedName = name.toLocaleLowerCase('es-MX');
-      const duplicated = newProductNames.has(normalizedName) || products.some((candidate) => (
-        candidate.storeId === storeId
-        && String(candidate.name || '').trim().toLocaleLowerCase('es-MX') === normalizedName
-      ));
-      if (duplicated) throw new Error(`Ya existe un producto llamado "${name}" en esta tienda.`);
-      newProductNames.add(normalizedName);
+      if (newProductNames.has(normalizedName)) throw new Error(`El producto "${name}" está repetido en la orden.`);
       const existingCatalog = catalogByName.get(normalizedName);
       if (existingCatalog?.status === 'archived') {
         throw new Error(`"${name}" está archivado en el catálogo; restáuralo antes de comprarlo.`);
       }
+      const existingProduct = products.find((candidate) => (
+        candidate.storeId === storeId
+        && String(candidate.name || '').trim().toLocaleLowerCase('es-MX') === normalizedName
+      ));
+      if (existingProduct) {
+        if (existingCatalog?.supplierId !== supplier.id) {
+          throw new Error(`${name} no pertenece al proveedor ${supplier.name}.`);
+        }
+        if (!validQuantity(line.qty)) {
+          throw new Error(`Cantidad no válida para ${name} (máximo dos decimales).`);
+        }
+        if (!validMoney(line.unitCost)) {
+          throw new Error(`Costo no válido para ${name} (máximo dos decimales).`);
+        }
+        newProductNames.add(normalizedName);
+        if (seen.has(existingProduct.id)) throw new Error(`${name} está repetido en la orden.`);
+        seen.add(existingProduct.id);
+        return {
+          productId: existingProduct.id,
+          productName: existingProduct.name,
+          unit: existingProduct.unit || 'L',
+          qtyOrdered: line.qty,
+          qtyReceived: 0,
+          unitCostCents: toHundredths(line.unitCost),
+        };
+      }
+      newProductNames.add(normalizedName);
       const isNewCatalog = !existingCatalog;
       const catalogId = existingCatalog ? existingCatalog.id : doc(collection(db, 'catalogProducts')).id;
       if (!validQuantity(line.qty)) {
@@ -173,16 +196,27 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
       if (!catalogItem || catalogItem.status === 'archived') {
         throw new Error('Uno de los productos del catálogo ya no está disponible.');
       }
-      if (products.some((candidate) => candidate.storeId === storeId && candidate.catalogId === catalogItem.id)) {
-        throw new Error(`${catalogItem.name} ya está habilitado en esta tienda.`);
-      }
-      if (seen.has(`catalog:${catalogItem.id}`)) throw new Error(`${catalogItem.name} está repetido en la orden.`);
-      seen.add(`catalog:${catalogItem.id}`);
+      const existingProduct = products.find((candidate) => (
+        candidate.storeId === storeId && candidate.catalogId === catalogItem.id
+      ));
+      const itemKey = existingProduct?.id || `catalog:${catalogItem.id}`;
+      if (seen.has(itemKey)) throw new Error(`${catalogItem.name} está repetido en la orden.`);
+      seen.add(itemKey);
       if (!validQuantity(line.qty)) {
         throw new Error(`Cantidad no válida para ${catalogItem.name} (máximo dos decimales).`);
       }
       if (!validMoney(line.unitCost)) {
         throw new Error(`Costo no válido para ${catalogItem.name} (máximo dos decimales).`);
+      }
+      if (existingProduct) {
+        return {
+          productId: existingProduct.id,
+          productName: existingProduct.name,
+          unit: existingProduct.unit || catalogItem.unit || 'L',
+          qtyOrdered: line.qty,
+          qtyReceived: 0,
+          unitCostCents: toHundredths(line.unitCost),
+        };
       }
       const productRef = doc(db, 'stockItems', stockItemId(storeId, catalogItem.id));
       newProducts.push({
@@ -237,28 +271,61 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
   );
   if (totalCents > MAX_TOTAL_CENTS) throw new Error('El total de la orden es demasiado alto.');
 
+  let productsToStage = newProducts;
+  if (newProducts.length > 0) {
+    const stockSnapshot = await getDocs(query(
+      collection(db, 'stockItems'),
+      where('storeId', '==', storeId),
+    ));
+    const existingStock = new Map(stockSnapshot.docs.map((stockDoc) => [stockDoc.id, stockDoc.data()]));
+    newProducts.forEach(({ ref, data }) => {
+      const existing = existingStock.get(ref.id);
+      if (existing && (existing.storeId !== storeId || existing.catalogId !== data.catalogId)) {
+        throw new Error('Ya existe un registro de inventario incompatible para uno de los productos.');
+      }
+    });
+    productsToStage = newProducts.filter(({ ref }) => !existingStock.has(ref.id));
+  }
+
   const orderRef = doc(collection(db, 'purchaseOrders'));
   const createdAt = serverTimestamp();
-  await runTransaction(db, async (transaction) => {
-    newProducts.forEach(({ catalogRef, catalogData, ref, data }) => {
-      if (catalogRef) transaction.set(catalogRef, catalogData);
-      transaction.set(ref, data);
+  let stagedProducts = 0;
+  const alreadyStagedProducts = newProducts.length - productsToStage.length;
+  try {
+    for (let start = 0; start < productsToStage.length; start += MAX_STOCK_ITEMS_PER_COMMIT) {
+      const chunk = productsToStage.slice(start, start + MAX_STOCK_ITEMS_PER_COMMIT);
+      await runTransaction(db, async (transaction) => {
+        chunk.forEach(({ catalogRef, catalogData, ref, data }) => {
+          if (catalogRef) transaction.set(catalogRef, catalogData);
+          transaction.set(ref, data);
+        });
+      });
+      stagedProducts += chunk.length;
+    }
+
+    await runTransaction(db, async (transaction) => {
+      transaction.set(orderRef, {
+        storeId,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        orderNumber: `OC-${orderRef.id.slice(0, 8).toUpperCase()}`,
+        status: 'pending',
+        items,
+        totalCents,
+        receivedCents: 0,
+        notes: String(notes || '').trim().slice(0, 500),
+        createdBy: userInfo(user),
+        createdAt,
+        updatedAt: createdAt,
+      });
     });
-    transaction.set(orderRef, {
-      storeId,
-      supplierId: supplier.id,
-      supplierName: supplier.name,
-      orderNumber: `OC-${orderRef.id.slice(0, 8).toUpperCase()}`,
-      status: 'pending',
-      items,
-      totalCents,
-      receivedCents: 0,
-      notes: String(notes || '').trim().slice(0, 500),
-      createdBy: userInfo(user),
-      createdAt,
-      updatedAt: createdAt,
-    });
-  });
+  } catch (error) {
+    const availableProducts = stagedProducts + alreadyStagedProducts;
+    if (availableProducts > 0) {
+      throw new Error(`No se pudo crear la orden. ${availableProducts} producto(s) quedaron habilitado(s) con su stock actual; vuelve a intentarlo para crear la orden. Detalle: ${error.message}`);
+    }
+    throw error;
+  }
   return orderRef.id;
 }
 
@@ -276,6 +343,25 @@ export async function cancelPurchaseOrder(orderId, user) {
       status: 'cancelled',
       cancelledBy: userInfo(user),
       cancelledAt: now,
+      updatedAt: now,
+    });
+  });
+}
+
+export async function closePartialPurchaseOrder(orderId, user) {
+  if (!db) throw new Error('Firestore no está inicializado.');
+  const orderRef = doc(db, 'purchaseOrders', orderId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(orderRef);
+    if (!snapshot.exists()) throw new Error('La orden ya no existe.');
+    if (snapshot.data().status !== 'partial') {
+      throw new Error('Solo se pueden cerrar órdenes con recepción parcial.');
+    }
+    const now = serverTimestamp();
+    transaction.update(orderRef, {
+      status: 'closed',
+      closedBy: userInfo(user),
+      closedAt: now,
       updatedAt: now,
     });
   });
