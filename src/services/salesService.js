@@ -5,6 +5,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { createPurchaseRequest } from './purchaseService';
 
 const roundToCents = (value) => Number(value.toFixed(2));
 
@@ -52,7 +53,7 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
     userRole: user?.role || 'cajero',
   };
 
-  return runTransaction(db, async (transaction) => {
+  const saleResult = await runTransaction(db, async (transaction) => {
     const [shiftSnapshot, registerSnapshot] = await Promise.all([
       transaction.get(shiftRef),
       transaction.get(registerRef),
@@ -119,6 +120,28 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
       };
     });
 
+    // Productos que cruzan el stock mínimo con esta venta; la solicitud se crea tras confirmar.
+    const restockCandidates = [];
+    saleItems.forEach((item, index) => {
+      const stock = stockSnapshots[index].data();
+      const catalog = catalogSnapshots[index].data();
+      const minStock = Number(stock.minStock ?? catalog.minStock);
+      if (!(minStock > 0) || item.previousStock <= minStock || item.newStock > minStock
+        || catalog.status !== 'active' || !catalog.supplierId) return;
+      restockCandidates.push({
+        storeId,
+        supplierId: catalog.supplierId,
+        qtyRequested: Number(Math.max(minStock * 2 - item.newStock, 0.01).toFixed(2)),
+        product: {
+          id: item.productId,
+          catalogId: stock.catalogId,
+          storeId,
+          name: catalog.name,
+          unit: item.unit,
+        },
+      });
+    });
+
     const total = roundToCents(saleItems.reduce((sum, item) => sum + item.total, 0));
     const totalCents = Math.round(total * 100);
     const liters = Number(saleItems.reduce((sum, item) => sum + item.qty, 0).toFixed(2));
@@ -176,6 +199,14 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
       id: saleRef.id,
       timestamp: new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
       timestampMs: Date.now(),
+      restockCandidates,
     };
   });
+
+  const { restockCandidates, ...result } = saleResult;
+  // Un fallo aquí (p. ej. proveedor inactivo) no debe afectar la venta ya registrada.
+  await Promise.allSettled(restockCandidates.map(({ product, supplierId, qtyRequested, storeId: requestStore }) => (
+    createPurchaseRequest({ storeId: requestStore, product, supplierId, qtyRequested, user })
+  )));
+  return result;
 }

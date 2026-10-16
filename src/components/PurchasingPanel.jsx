@@ -23,7 +23,7 @@ import {
 const STATUS_LABELS = {
   pending: { label: 'Pendiente', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
   partial: { label: 'Recibida parcial', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
-  received: { label: 'Recibida', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  received: { label: 'Cerrada', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
   closed: { label: 'Cerrada parcial', className: 'bg-slate-600/30 text-slate-300 border-slate-600' },
   cancelled: { label: 'Cancelada', className: 'bg-slate-600/30 text-slate-400 border-slate-600' },
 };
@@ -88,6 +88,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const orderCsvInputRef = useRef(null);
   const [receiveModal, setReceiveModal] = useState(null); // { order, inputs }
   const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
     if (!canManagePurchases) return undefined;
@@ -120,6 +121,14 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const visibleOrders = useMemo(
     () => orders.filter((order) => !isCashier || ['pending', 'partial', 'received'].includes(order.status)),
     [orders, isCashier],
+  );
+  const availableStatuses = useMemo(
+    () => Object.keys(STATUS_LABELS).filter((value) => !isCashier || ['pending', 'partial', 'received'].includes(value)),
+    [isCashier],
+  );
+  const filteredOrders = useMemo(
+    () => (statusFilter === 'all' ? visibleOrders : visibleOrders.filter((order) => order.status === statusFilter)),
+    [visibleOrders, statusFilter],
   );
   const pendingRequestGroups = useMemo(() => {
     const groups = new Map();
@@ -817,11 +826,30 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                 Agrega al menos un proveedor activo para crear órdenes de compra.
               </p>
             )}
-            {visibleOrders.length === 0 ? (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar órdenes por estado">
+              {[{ value: 'all', label: 'Todas' }, ...availableStatuses.map((value) => ({ value, label: STATUS_LABELS[value].label }))].map((option) => {
+                const count = option.value === 'all' ? visibleOrders.length : visibleOrders.filter((order) => order.status === option.value).length;
+                const selected = statusFilter === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setStatusFilter(option.value)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${selected ? 'border-cyan-400 bg-cyan-500/15 text-cyan-200' : 'border-slate-600 text-slate-300 hover:border-slate-400'}`}
+                  >
+                    {option.label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+            {filteredOrders.length === 0 ? (
               <p className="rounded-2xl border border-slate-700 bg-slate-800 py-10 text-center text-sm text-slate-400">
-                {isCashier ? 'No hay órdenes de compra para esta tienda.' : 'Esta tienda aún no tiene órdenes de compra.'}
+                {visibleOrders.length > 0
+                  ? 'No hay órdenes con este estado.'
+                  : isCashier ? 'No hay órdenes de compra para esta tienda.' : 'Esta tienda aún no tiene órdenes de compra.'}
               </p>
-            ) : visibleOrders.map((order) => {
+            ) : filteredOrders.map((order) => {
               const status = STATUS_LABELS[order.status] || STATUS_LABELS.pending;
               const isOpen = expandedOrderId === order.id;
               const canReceive = order.status === 'pending' || order.status === 'partial';

@@ -1,53 +1,150 @@
-# LimpiezaPOS
+# POSKlean 🛒🧪
 
-Aplicación de punto de venta e inventario con React, Vite y Firebase Firestore.
+**POSKlean** es un sistema de Punto de Venta (POS) y gestión de inventario ligero, moderno y eficiente, diseñado para negocios de comercialización de productos (como productos de limpieza, insumos o venta al detalle).
 
-## Configurar Firebase
+El sistema está desarrollado con **React**, **Vite** y **Firebase** (Firestore, Authentication y Hosting), ofreciendo sincronización en tiempo real, control de caja/turnos, gestión de inventario por volúmenes/unidades e impresión de tickets.
 
-1. En Firebase Console, registra una aplicación web para el proyecto `posklean` (o el proyecto que vayas a usar) y copia su configuración del SDK web.
-2. Copia `.env.example` a `.env.local` y completa las variables `VITE_FIREBASE_*` con esos valores. La configuración web identifica el proyecto, pero no sustituye las reglas de seguridad de Firestore.
-3. Los productos se gestionan desde la pestaña **Catálogo** (administradores y supervisores): no hace falta crear documentos a mano. El catálogo central vive en `catalogProducts` (nombre, categoría, unidad, precio global, estado) y las existencias por sucursal en `stockItems` (ID `<storeId>_<catalogId>`: stock, mínimo, costo y `priceOverride` opcional). Los datos de la antigua colección `products` no se migran.
-4. Habilita **Authentication → Email/Password** y **Google** en la consola de Firebase y publica las reglas con `npx firebase-tools deploy --only firestore:rules` (archivo `firestore.rules`). Las reglas exigen sesión de Firebase y autorizan según el perfil `users/{uid}` (rol, estado y tienda).
-5. Ejecuta `npm install` y luego `npm run dev`.
+---
 
-### Autenticación
+## 🚀 Características Principales
 
-- Los usuarios con usuario/contraseña se autentican en Firebase Auth con un correo ficticio `<usuario>@posklean.invalid`; la contraseña nunca se guarda en Firestore. Mínimo 6 caracteres.
-- El perfil de cada cuenta vive en `users/{uid}`. El administrador crea cuentas desde el panel (se usa una instancia secundaria de Firebase para no cerrar su sesión).
-- No es posible cambiar la contraseña de otro usuario desde el cliente. Si se olvida, elimina el perfil y crea un usuario nuevo (el mismo nombre solo se puede reutilizar con la contraseña anterior).
-- Las cuentas de Google no se pre-registran: inician sesión, quedan **Pendientes** y un administrador las aprueba. El administrador principal se identifica por su cuenta de Google verificada.
-- Usuarios creados antes de esta migración (con hash local) no pueden iniciar sesión; vuelve a crearlos con el mismo nombre de usuario para reemplazarlos.
+* **🛒 Punto de Venta (POS):**
+  * Procesamiento de ventas rápidas.
+  * Cálculo automático de totales, impuestos y cambio.
+  * Formateo de moneda y conversiones de volumen/unidades.
+  * Generación e impresión de tickets de compra.
 
-La pantalla escucha `catalogProducts`, `stockItems` y `sales` en tiempo real y fusiona catálogo y existencias en cada producto visible (precio = precio propio de la tienda o, si no tiene, el global). No crea inventario ni tickets de ejemplo.
+* **💰 Control de Caja y Turnos (`useCashShift`):**
+  * Apertura, arqueo y cierre de turnos de caja.
+  * Registro de entradas y salidas de dinero.
+  * Historial de cortes de caja.
 
-### Catálogo central y existencias por sucursal
+* **📦 Gestión de Inventario:**
+  * Control de stock e insumos en tiempo real.
+  * Alertas de stock bajo y actualización de precios.
 
-Un producto se define una sola vez en el catálogo y se "habilita" en cada tienda con su stock inicial, mínimo y costo. Administradores y supervisores crean y editan el catálogo y fijan un precio propio por tienda (vacío = precio global); los productos se archivan (solo sin existencias) en lugar de borrarse. Al recibir una compra, el precio aceptado se guarda como precio propio de esa tienda. Quitar un producto de una tienda (stock 0) borra solo sus existencias en esa tienda. Crear un producto desde Inventario o desde una orden de compra reutiliza el del catálogo si el nombre ya existe. Cada producto del catálogo se asocia a un proveedor (`supplierId`); en una orden de compra el proveedor se toma de los productos elegidos (todos deben ser del mismo proveedor y los que no tienen proveedor aparecen deshabilitados). Si la orden solo incluye productos nuevos, se elige el proveedor que se les asignará. El catálogo se puede importar desde un CSV (botón **Importar CSV**; la **Plantilla CSV** trae las columnas `nombre, categoria, unidad, precio_compra, stock_minimo, proveedor`, acepta `,` o `;`; el precio de venta se calcula como compra ÷ 0.5 y puede forzarse con una columna opcional `precio_venta`): se muestra una vista previa con los errores por fila y los nombres ya existentes se omiten. Si el CSV trae proveedores que no existen, la vista previa pregunta si crearlos (se asocian a sus productos) o importar esos productos sin proveedor.
+* **👥 Usuarios y Permisos:**
+  * Autenticación segura mediante Firebase Auth.
+  * Roles de cajeros y administradores.
 
-## Operaciones de venta e inventario
+* **☁️ Integración e Infraestructura:**
+  * Sincronización continua con **Firebase Firestore**.
+  * Reglas de seguridad avanzadas en Firestore (`firestore.rules`).
+  * Despliegue continuo con **GitHub Actions** y **Firebase Hosting**.
 
-`src/services/inventoryService.js` gestiona tanto el alta de nuevos productos (`addProduct`) como el resurtido de existencias (`restockProduct`). Los productos nuevos se crean desde la pestaña **Catálogo** (administradores y supervisores) con el botón de nuevo producto: nombre, categoría, unidad, color y precio de venta, y opcionalmente se habilitan en una tienda con stock inicial, mínimo y costo (precio sugerido con 50% de margen). Inventario ya no crea productos; muestra y resurte las existencias de la tienda. Administradores y supervisores pueden **transferir** existencias a otra tienda (`src/services/transferService.js`): una transacción descuenta el origen, suma al destino (lo habilita con el costo del origen o promedia el costo si ya existe) y registra movimientos `transfer_out` y `transfer_in`. El stock se actualiza mediante transacciones de Firestore para prevenir sobreescrituras concurrentes y los cambios se reflejan en tiempo real con `onSnapshot()`.
+---
 
-`src/services/salesService.js` procesa cada cobro en una transacción: lee los productos, verifica que existan y que tengan stock suficiente, calcula el precio desde Firestore, descuenta `currentStock` y crea un ticket en `sales` como una sola operación atómica. Las ventas guardan cantidades y precios de cada artículo junto con el canal, el total y una marca de tiempo del servidor.
+## 🛠️ Tecnologías Utilizadas
 
-### Turnos y cierres de caja
+* **Frontend:** [React](https://reactjs.org/), [Vite](https://vitejs.dev/)
+* **Backend & BD:** [Firebase Firestore](https://firebase.google.com/docs/firestore)
+* **Autenticación:** [Firebase Auth](https://firebase.google.com/docs/auth)
+* **Hosting & CI/CD:** Firebase Hosting, GitHub Actions
+* **Linter & Code Quality:** Oxlint
 
-Cada usuario puede mantener un solo turno abierto a la vez. Antes de vender debe abrir un turno en una tienda activa e indicar el fondo inicial. Cada venta registra por separado el canal comercial y un único método de pago: efectivo, tarjeta o transferencia. El cierre suma las ventas de ese turno, calcula el efectivo esperado como fondo inicial más ventas en efectivo, guarda el efectivo contado y la diferencia, y permite imprimir el cierre. Las reglas exigen que la venta apunte al turno abierto de su cajero y que la caja y el turno cambien de estado juntos.
+---
 
-El cálculo actual no contempla retiros, entradas adicionales de efectivo, devoluciones ni pagos divididos; cualquier diferencia debe registrarse como diferencia de cierre. Las cifras se calculan en el cliente y las reglas validan el flujo y los tipos, pero no reemplazan un backend confiable para auditar importes frente a clientes manipulados.
+## 📁 Estructura del Proyecto
 
-Las transacciones del SDK web evitan inconsistencias por ventas concurrentes, pero el código cliente no es una frontera de seguridad contra clientes manipulados. Las reglas de Firestore limitan cada cajero a su tienda e impiden modificar o borrar ventas y movimientos, pero no pueden verificar por completo cifras como stock o totales enviadas por un cliente alterado; para eso se requiere un backend autenticado.
+```text
+POSKlean/
+├── .github/workflows/     # Workflows para integración y despliegue continuo (CI/CD)
+├── public/                # Archivos estáticos e íconos (favicon, SVG)
+├── src/
+│   ├── assets/            # Recursos gráficos (imágenes, logos)
+│   ├── components/        # Componentes UI reutilizables (PrintTicket, etc.)
+│   ├── hooks/             # Custom Hooks (usePOSData, useCashShift)
+│   ├── services/          # Servicios para Firestore (sales, inventory, cashShift, etc.)
+│   ├── utils/             # Funciones utilitarias (currency, volume)
+│   ├── App.jsx            # Componente principal de la aplicación
+│   ├── firebase.js        # Configuración e inicialización de SDK Firebase
+│   └── main.jsx           # Punto de entrada de React
+├── firestore.rules        # Reglas de seguridad para Firestore
+├── firebase.json          # Configuración de servicios de Firebase
+└── vite.config.js         # Configuración del bundler Vite
+```
 
-### Archivado de tiendas
+---
 
-Al archivar una tienda, la operación elimina en una transacción las asignaciones de sus cajeros tanto en los perfiles como en la tienda. Esos usuarios quedan sin tienda y no pueden operar en el POS hasta que se les asigne una tienda activa. Reactivar una tienda no restaura asignaciones anteriores; deben hacerse explícitamente desde la administración. Las reglas permiten consultar información histórica de tiendas archivadas a administradores, pero bloquean nuevas ventas y modificaciones de inventario en ellas.
+## ⚙️ Requisitos Previos
 
-### Compras y proveedores
+Asegúrate de contar con lo siguiente instalado en tu entorno local:
 
-La pestaña Compras (administradores y supervisores) mantiene un catálogo global de proveedores, que se archivan en lugar de borrarse, y órdenes de compra por tienda. Una orden nace `pending`, pasa a `partial` o `received` con cada recepción (admite recepciones parciales) y solo puede cancelarse mientras no tenga recepciones. Al recibir, una transacción suma el stock, recalcula el costo del producto como promedio ponderado entre el stock actual y lo recibido, y registra un movimiento de inventario tipo `purchase`. Si quien recibe es administrador o supervisor, se le sugiere un nuevo precio de venta (costo promedio ÷ 0.5, es decir 50% de margen sobre la venta) y decide si aplicarlo. Los productos nuevos creados desde una orden sugieren su precio con el mismo criterio. No incluye cuentas por pagar.
+* [Node.js](https://nodejs.org/) (versión 18 o superior recomendada)
+* `npm` o `yarn`
+* Una cuenta en [Firebase Console](https://console.firebase.google.com/) con un proyecto creado.
 
-Limitaciones: las reglas no iteran las líneas de la orden (solo validan que sea una lista de 1 a 50 elementos; el detalle se valida en el cliente), no enlazan la recepción con el producto ni el movimiento correspondientes, y un supervisor puede modificar el costo y el precio de venta de productos de sus tiendas. Cualquier regla nueva debe publicarse con `firebase deploy --only firestore:rules`.
+---
 
-## Impresión de tickets
+## 💻 Instalación y Configuración Local
 
-Desde el POS se puede imprimir el ticket después del cobro, o reimprimir cualquier ticket desde el historial. El selector permite ajustar el ancho a impresoras de 58 mm u 80 mm.
+1. **Clonar el repositorio:**
+   ```bash
+   git clone <URL_DEL_REPOSOTORIO>
+   cd POSKlean
+   ```
+
+2. **Instalar dependencias:**
+   ```bash
+   npm install
+   ```
+
+3. **Configurar variables de entorno / Firebase:**
+   Asegúrate de configurar tus credenciales de Firebase en `src/firebase.js` o mediante un archivo `.env.local` según el flujo de trabajo de tu equipo:
+
+   ```javascript
+   // src/firebase.js
+   const firebaseConfig = {
+     apiKey: "TU_API_KEY",
+     authDomain: "TU_PROJECT_ID.firebaseapp.com",
+     projectId: "TU_PROJECT_ID",
+     storageBucket: "TU_PROJECT_ID.appspot.com",
+     messagingSenderId: "TU_SENDER_ID",
+     appId: "TU_APP_ID"
+   };
+   ```
+
+4. **Iniciar el servidor de desarrollo:**
+   ```bash
+   npm run dev
+   ```
+   Abre tu navegador en `http://localhost:5173`.
+
+---
+
+## 🚀 Comandos Disponibles
+
+| Comando | Descripción |
+| :--- | :--- |
+| `npm run dev` | Inicia el servidor de desarrollo con Hot Reloading (Vite). |
+| `npm run build` | Compila la aplicación para producción en la carpeta `dist`. |
+| `npm run preview` | Previsualiza la build de producción localmente. |
+| `npm run lint` | Ejecuta el linter (Oxlint) para verificar la calidad del código. |
+
+---
+
+## ☁️ Despliegue
+
+El proyecto cuenta con integración continua mediante **GitHub Actions** en `.github/workflows/`. Cada actualización o Merge a la rama principal desplegará automáticamente los cambios a **Firebase Hosting**.
+
+Para hacer un despliegue manual desde la terminal:
+
+```bash
+npm run build
+firebase deploy --only hosting
+```
+
+---
+
+## 📄 Licencia
+
+Este proyecto es de uso privado / comercial para la gestión de POS. Todos los derechos reservados.
+
+## ☁️ Urls
+
+Produccion
+https://posklean.web.app/
+Pruebas
+https://posklean--pruebas-p66zbkr1.web.app
+
+---

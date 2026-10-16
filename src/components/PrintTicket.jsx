@@ -82,7 +82,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           <div className="receipt-item"><span>Proveedor</span><strong>{data.supplierName || '—'}</strong></div>
           <div className="receipt-item">
             <span>Estado</span>
-            <strong>{{ pending: 'Pendiente', partial: 'Recepción parcial', received: 'Recibida', closed: 'Cerrada parcial', cancelled: 'Cancelada' }[data.status] || '—'}</strong>
+            <strong>{{ pending: 'Pendiente', partial: 'Recepción parcial', received: 'Cerrada', closed: 'Cerrada parcial', cancelled: 'Cancelada' }[data.status] || '—'}</strong>
           </div>
           <hr />
           <p><strong>Productos ({data.items.length})</strong></p>
