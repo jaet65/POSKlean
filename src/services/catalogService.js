@@ -10,6 +10,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { categoryColor } from '../utils/categoryColor';
 
 export const stockItemId = (storeId, catalogId) => `${storeId}_${catalogId}`;
 
@@ -32,9 +33,11 @@ const requireManager = (user) => {
 
 export const normalizeProductName = (name) => String(name || '').trim().toLocaleLowerCase('es-MX');
 
-function cleanCatalogFields({ name, category, unit, color, price, minStock = 0, supplierId = null }) {
+function cleanCatalogFields({ name, category, description = '', unit, price, minStock = 0, supplierId = null }) {
   const cleanName = String(name || '').trim();
   const cleanCategory = String(category || '').trim();
+  const cleanDescription = String(description || '').trim();
+  if (cleanDescription.length > 300) throw new Error('La descripción admite máximo 300 caracteres.');
   const cleanUnit = String(unit || '').trim() || 'L';
   if (!cleanName || cleanName.length > 120) throw new Error('Escribe el nombre del producto (máximo 120 caracteres).');
   if (!cleanCategory || cleanCategory.length > 60) throw new Error('Indica la categoría (máximo 60 caracteres).');
@@ -50,8 +53,9 @@ function cleanCatalogFields({ name, category, unit, color, price, minStock = 0, 
   return {
     name: cleanName,
     category: cleanCategory,
+    description: cleanDescription,
     unit: cleanUnit,
-    color: color || 'bg-cyan-500',
+    color: categoryColor(cleanCategory),
     price: numericPrice,
     minStock: numericMin,
     supplierId: String(supplierId || '').trim() || null,

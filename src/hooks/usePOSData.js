@@ -166,6 +166,7 @@ export function usePOSData(storeId, enabled = true) {
         ...stock,
         name: item.name,
         category: item.category,
+        description: item.description || '',
         unit: item.unit || 'L',
         color: item.color || 'bg-cyan-500',
         globalPrice: item.price,

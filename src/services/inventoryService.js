@@ -56,7 +56,6 @@ export async function addProduct(productData, user = null, storeId = null) {
     unit = 'L',
     price,
     cost,
-    color = 'bg-cyan-500',
   } = productData || {};
 
   const trimmedName = typeof name === 'string' ? name.trim() : '';
@@ -108,7 +107,6 @@ export async function addProduct(productData, user = null, storeId = null) {
       name: trimmedName,
       category: trimmedCategory,
       unit: trimmedUnit,
-      color,
       price: numPrice,
     }, user);
     catalogProduct = {

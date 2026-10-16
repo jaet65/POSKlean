@@ -22,7 +22,7 @@ rules_version = '2';
 //   openCashShiftCount: int (defaults to 0 and must be 0 when archived)
 //
 // Collection: catalogProducts   Document ID: auto (never deleted, only archived)
-//   name, category, unit, color: string; price: number (global default sale price);
+//   name, category, unit, color: string; description?: string; price: number (global default sale price);
 //   minStock?: number (default minimum stock suggested when enabling in a store);
 //   supplierId?: string|null (suppliers/{id} that provides this product);
 //   status: 'active'|'archived'; createdBy: map; createdAt, updatedAt: timestamp
@@ -65,6 +65,9 @@ rules_version = '2';
 //   createdAt, updatedAt: timestamp; receivedAt?, closedAt?, cancelledAt?: timestamp
 //   Suppliers are managed by admins and supervisors; cashiers may read and receive
 //   orders belonging to their assigned active store.
+//
+// Collection: categories  Document ID: derived from the normalized name
+//   name: string; createdBy: map; createdAt: timestamp.
 //
 // Collection: purchaseRequests  Document ID: auto
 //   storeId, supplierId, requestNumber: string; items: list with one productId,
@@ -424,6 +427,7 @@ service cloud.firestore {
         && validText(data.category, 60) && data.category.size() > 0
         && validText(data.get('unit', 'L'), 10)
         && validText(data.get('color', ''), 40)
+        && validText(data.get('description', ''), 300)
         && validNonNegative(data.price) && data.price > 0
         && validNonNegative(data.get('minStock', 0))
         && (data.get('supplierId', null) == null
@@ -432,7 +436,7 @@ service cloud.firestore {
     }
 
     function isNewCatalogProduct(data) {
-      return hasOnlyKeys(data, ['name', 'category', 'unit', 'color', 'price', 'minStock', 'supplierId',
+      return hasOnlyKeys(data, ['name', 'category', 'description', 'unit', 'color', 'price', 'minStock', 'supplierId',
           'status', 'createdBy', 'createdAt', 'updatedAt'])
         && data.keys().hasAll(['name', 'category', 'price', 'status', 'createdBy', 'createdAt',
           'updatedAt'])
@@ -763,11 +767,23 @@ service cloud.firestore {
       allow read: if isActiveStaff();
       allow create: if isPurchasingStaff() && isNewCatalogProduct(request.resource.data);
       allow update: if isPurchasingStaff()
-        && changedKeys().hasOnly(['name', 'category', 'unit', 'color', 'price', 'minStock', 'supplierId',
+        && changedKeys().hasOnly(['name', 'category', 'description', 'unit', 'color', 'price', 'minStock', 'supplierId',
           'status', 'updatedAt'])
         && hasValidCatalogFields(request.resource.data)
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
+    }
+
+    // Product categories: readable by active staff; created/deleted by admins and supervisors.
+    match /categories/{categoryId} {
+      allow read: if isActiveStaff();
+      allow create: if isPurchasingStaff()
+        && hasOnlyKeys(request.resource.data, ['name', 'createdBy', 'createdAt'])
+        && validText(request.resource.data.name, 60) && request.resource.data.name.size() > 0
+        && isOwnAuthorship(request.resource.data.createdBy)
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isPurchasingStaff();
     }
 
     // Per-store stock (and optional own price) of a catalog product.

@@ -1,6 +1,6 @@
-export const CSV_TEMPLATE = 'nombre,categoria,unidad,precio_compra,stock_minimo,proveedor\n'
-  + 'Jabón líquido,Jabón,L,22.75,10,Proveedor Ejemplo\n'
-  + 'Suavizante floral,Suavizante,L,19,10,Proveedor Ejemplo\n';
+export const CSV_TEMPLATE = 'nombre,categoria,descripcion,unidad,precio_compra,stock_minimo,proveedor\n'
+  + 'Jabón líquido,Jabón,Jabón para manos,L,22.75,10,Proveedor Ejemplo\n'
+  + 'Suavizante floral,Suavizante,,L,19,10,Proveedor Ejemplo\n';
 
 // Mismo criterio que el catálogo: 50% de margen sobre la venta.
 const suggestedSalePrice = (cost) => Math.round((cost / 0.5) * 100) / 100;
@@ -9,6 +9,7 @@ const HEADER_ALIASES = {
   nombre: 'name',
   producto: 'name',
   categoria: 'category',
+  descripcion: 'description',
   unidad: 'unit',
   preciocompra: 'cost',
   costo: 'cost',
@@ -115,6 +116,7 @@ export function parseCatalogCsv(rawText, suppliers = []) {
     else if (supplierKey && !supplier && archivedNames.has(supplierKey)) message = `El proveedor "${record.supplier}" está archivado.`;
     else if (supplierKey && !supplier && record.supplier.length > 120) message = 'Nombre de proveedor mayor a 120 caracteres.';
     else if (!record.category || record.category.length > 60) message = 'Categoría vacía o mayor a 60 caracteres.';
+    else if ((record.description || '').length > 300) message = 'Descripción mayor a 300 caracteres.';
     else if ((record.unit || '').length > 10) message = 'La unidad admite máximo 10 caracteres.';
     else if (!Number.isFinite(cost) || cost <= 0 || Math.round(cost * 100) / 100 !== cost) message = 'Precio de compra inválido (mayor a 0, máximo dos decimales).';
     else if (!Number.isFinite(price) || price <= 0 || Math.round(price * 100) / 100 !== price) message = 'Precio de venta inválido (mayor a 0, máximo dos decimales).';
@@ -134,6 +136,7 @@ export function parseCatalogCsv(rawText, suppliers = []) {
       line,
       name: record.name,
       category: record.category,
+      description: record.description || '',
       unit: record.unit || 'L',
       cost,
       price,

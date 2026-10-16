@@ -517,8 +517,7 @@ export default function App() {
   }, [products]);
 
   const availableCategories = useMemo(() => {
-    const defaultCats = ['Jabón', 'Suavizante'];
-    const cats = new Set(defaultCats);
+    const cats = new Set();
     products.forEach((p) => {
       if (p.category && typeof p.category === 'string' && p.category.trim()) {
         cats.add(p.category.trim());
@@ -526,6 +525,12 @@ export default function App() {
     });
     return Array.from(cats);
   }, [products]);
+
+  useEffect(() => {
+    if (selectedCategory !== 'Todos' && !availableCategories.includes(selectedCategory)) {
+      setSelectedCategory('Todos');
+    }
+  }, [availableCategories, selectedCategory]);
 
   const storeNameById = useMemo(
     () => new Map(stores.map((store) => [store.id, store.name])),
@@ -1722,7 +1727,7 @@ export default function App() {
             <div className="lg:col-span-7 flex flex-col gap-4">
               
               {/* Search & Category Filter */}
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col sm:flex-row gap-3">
+              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col gap-3">
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                   <input
@@ -1734,7 +1739,7 @@ export default function App() {
                   />
                 </div>
                 
-                <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
+                <div className="flex gap-1 overflow-x-auto pb-1">
                   {['Todos', ...availableCategories].map(cat => (
                     <button
                       key={cat}
@@ -1787,6 +1792,11 @@ export default function App() {
                         <h3 className="font-semibold text-sm text-slate-100 line-clamp-2 leading-snug mb-1">
                           {prod.name}
                         </h3>
+                        {prod.description && (
+                          <p title={prod.description} className="text-[11px] text-slate-400 line-clamp-2 leading-snug">
+                            {prod.description}
+                          </p>
+                        )}
                       </div>
 
                       <div className="mt-3 pt-2 border-t border-slate-700/60 flex items-center justify-between">

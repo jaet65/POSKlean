@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { normalizeProductName, stockItemId } from './catalogService';
+import { categoryColor } from '../utils/categoryColor';
 
 const MAX_LINES = 50;
 const MAX_STOCK_ITEMS_PER_COMMIT = 8;
@@ -274,7 +275,7 @@ export async function createPurchaseOrder({
           name,
           category,
           unit,
-          color: 'bg-cyan-500',
+          color: categoryColor(category),
           price: draft.price,
           supplierId: supplier.id,
           status: 'active',

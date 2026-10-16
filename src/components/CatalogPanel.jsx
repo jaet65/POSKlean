@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ChevronDown, ChevronRight, Layers, Pencil, Plus, RotateCcw, Upload, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
+import { categoryColor } from '../utils/categoryColor';
 import { CSV_TEMPLATE, parseCatalogCsv } from '../utils/catalogCsv';
 import {
   createCatalogProduct,
@@ -12,6 +13,7 @@ import {
 } from '../services/catalogService';
 import { suggestedSalePrice } from '../services/purchaseService';
 import { addSupplier, subscribeToSuppliers } from '../services/supplierService';
+import { deleteCategory, ensureCategory, subscribeToCategories } from '../services/categoryService';
 
 const UNIT_OPTIONS = [
   ['L', 'L (Litro)'],
@@ -21,26 +23,13 @@ const UNIT_OPTIONS = [
   ['Porrón', 'Porrón (20 L)'],
   ['Cubeta', 'Cubeta (19 L)'],
 ];
-const PRODUCT_COLORS = [
-  { name: 'Cian', class: 'bg-cyan-500' },
-  { name: 'Azul', class: 'bg-blue-500' },
-  { name: 'Esmeralda', class: 'bg-emerald-500' },
-  { name: 'Ámbar', class: 'bg-amber-500' },
-  { name: 'Púrpura', class: 'bg-purple-500' },
-  { name: 'Rosa', class: 'bg-rose-500' },
-  { name: 'Índigo', class: 'bg-indigo-500' },
-  { name: 'Lima', class: 'bg-lime-500' },
-  { name: 'Naranja', class: 'bg-orange-500' },
-  { name: 'Rojo', class: 'bg-red-500' },
-];
 const CUSTOM_CATEGORY = '__custom__';
-const DEFAULT_CATEGORIES = ['Jabón', 'Suavizante'];
 const EMPTY_FORM = {
   name: '',
+  description: '',
   category: '',
   customCategory: '',
   unit: 'L',
-  color: 'bg-cyan-500',
   price: '',
   priceAuto: true,
   storeId: '',
@@ -63,6 +52,9 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
   const [notice, setNotice] = useState('');
   const [csvPreview, setCsvPreview] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
+  const [storedCategories, setStoredCategories] = useState([]);
+  const [categoryModal, setCategoryModal] = useState(null); // { name }
+  useEffect(() => subscribeToCategories(setStoredCategories, () => setStoredCategories([])), []);
   useEffect(() => subscribeToSuppliers(setSuppliers, () => setSuppliers([])), []);
   const activeSuppliers = useMemo(
     () => suppliers.filter((supplier) => supplier.status !== 'archived'),
@@ -136,15 +128,16 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
     return map;
   }, [products]);
   const categories = useMemo(
-    () => [...new Set([...DEFAULT_CATEGORIES, ...catalog.map((item) => item.category).filter(Boolean)])]
+    () => [...new Set([...storedCategories.map((item) => item.name), ...catalog.map((item) => item.category)].filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'es')),
-    [catalog],
+    [catalog, storedCategories],
   );
+  const usedCategories = useMemo(() => new Set(catalog.map((item) => item.category)), [catalog]);
   const rows = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('es-MX');
     return catalog
       .filter((item) => (showArchived ? true : item.status !== 'archived'))
-      .filter((item) => !term || `${item.name} ${item.category}`.toLocaleLowerCase('es-MX').includes(term))
+      .filter((item) => !term || `${item.name} ${item.category} ${item.description || ''}`.toLocaleLowerCase('es-MX').includes(term))
       .sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }, [catalog, search, showArchived]);
 
@@ -172,10 +165,10 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
       ? {
         id: item.id,
         name: item.name,
+        description: item.description || '',
         category: categories.includes(item.category) ? item.category : CUSTOM_CATEGORY,
         customCategory: categories.includes(item.category) ? '' : item.category,
         unit: item.unit || 'L',
-        color: item.color || 'bg-cyan-500',
         price: String(item.price),
         minStock: String(item.minStock ?? 0),
         supplierId: item.supplierId || '',
@@ -205,14 +198,15 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
     const price = parseFloat(form.price);
     const fields = {
       name: form.name,
+      description: form.description,
       category,
       unit: form.unit,
-      color: form.color,
       price,
       minStock: parseFloat(form.minStock || '0'),
       supplierId: form.supplierId || null,
     };
     const ok = await run(async () => {
+      await ensureCategory(category, currentUser);
       if (form.id) {
         await updateCatalogProduct(form.id, fields, currentUser, catalog);
         return;
@@ -287,6 +281,13 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
           <input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="hidden" aria-label="Archivo CSV del catálogo" />
           <button
             type="button"
+            onClick={() => { setError(''); setCategoryModal({ name: '' }); }}
+            className="rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-slate-600"
+          >
+            Categorías
+          </button>
+          <button
+            type="button"
             onClick={() => openProductForm()}
             className="flex items-center gap-1.5 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400"
           >
@@ -320,6 +321,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             <tr>
               <th className="px-4 py-3">Producto</th>
               <th className="px-4 py-3">Categoría</th>
+              <th className="px-4 py-3">Descripción</th>
               <th className="px-4 py-3">Proveedor</th>
               <th className="px-4 py-3">Precio compra</th>
               <th className="px-4 py-3">Precio venta</th>
@@ -329,7 +331,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
           </thead>
           <tbody className="divide-y divide-slate-700/60">
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No hay productos en el catálogo.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">No hay productos en el catálogo.</td></tr>
             )}
             {rows.flatMap((item) => {
               const enabledCount = visibleStores.filter((store) => stockByKey.has(`${store.id}|${item.id}`)).length;
@@ -368,6 +370,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                     </button>
                   </td>
                   <td className="px-4 py-3">{item.category}</td>
+                  <td className="max-w-[14rem] truncate px-4 py-3 text-slate-400" title={item.description || ''}>{item.description || '—'}</td>
                   <td className="px-4 py-3">
                     {item.supplierId
                       ? supplierNameById.get(item.supplierId) || 'Proveedor archivado'
@@ -389,7 +392,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
               if (expanded) {
                 result.push(
                   <tr key={`${item.id}-stores`} className="bg-slate-900/50">
-                    <td colSpan={7} className="space-y-2 px-4 py-3">
+                    <td colSpan={8} className="space-y-2 px-4 py-3">
                       {visibleStores.length === 0 && <p className="text-slate-400">No hay tiendas activas.</p>}
                       {visibleStores.map((store) => {
                         const stock = stockByKey.get(`${store.id}|${item.id}`);
@@ -519,6 +522,46 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
         </div>
       )}
 
+      {categoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
+          <div role="dialog" aria-modal="true" aria-label="Categorías" className="w-full max-w-sm space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <h2 className="text-base font-bold text-white">Categorías</h2>
+              <button type="button" onClick={() => setCategoryModal(null)} aria-label="Cerrar" className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const ok = await run(() => ensureCategory(categoryModal.name, currentUser), 'Categoría agregada.');
+                if (ok) setCategoryModal({ name: '' });
+              }}
+            >
+              <input aria-label="Nueva categoría" required maxLength={60} placeholder="Nueva categoría" value={categoryModal.name} onChange={(event) => setCategoryModal({ name: event.target.value })} className={inputClass} />
+              <button type="submit" disabled={busy} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950 disabled:opacity-50">Agregar</button>
+            </form>
+            {error && <p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/20 p-2 text-xs text-rose-200">{error}</p>}
+            <ul className="max-h-64 space-y-1 overflow-y-auto">
+              {categories.length === 0 && <li className="text-xs text-slate-400">Aún no hay categorías.</li>}
+              {categories.map((name) => (
+                <li key={name} className="flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
+                  <span className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${categoryColor(name)}`} />{name}</span>
+                  <button
+                    type="button"
+                    disabled={busy || usedCategories.has(name)}
+                    title={usedCategories.has(name) ? 'Tiene productos asignados' : 'Eliminar'}
+                    onClick={() => run(() => deleteCategory(name, catalog), 'Categoría eliminada.')}
+                    className="text-rose-300 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    Eliminar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
           <form onSubmit={submitProduct} role="dialog" aria-modal="true" aria-label="Producto del catálogo" className="w-full max-w-md space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
@@ -529,6 +572,10 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             <div>
               <label htmlFor="cat-name" className={labelClass}>Nombre del producto: <span className="text-cyan-400">*</span></label>
               <input id="cat-name" required maxLength={120} placeholder="Ej. Jabón líquido de manos" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="cat-description" className={labelClass}>Descripción (opcional):</label>
+              <textarea id="cat-description" rows={2} maxLength={300} placeholder="Detalles del producto" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className={inputClass} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -614,20 +661,10 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                 </div>
               );
             })()}
-            <div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
               <span className={labelClass}>Color identificador:</span>
-              <div className="flex flex-wrap gap-2">
-                {PRODUCT_COLORS.map((color) => (
-                  <button
-                    key={color.class}
-                    type="button"
-                    title={color.name}
-                    aria-label={color.name}
-                    onClick={() => setForm({ ...form, color: color.class })}
-                    className={`h-7 w-7 rounded-full ${color.class} ${form.color === color.class ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-800' : 'opacity-70'}`}
-                  />
-                ))}
-              </div>
+              <span className={`h-4 w-4 rounded-full ${categoryColor(form.category === CUSTOM_CATEGORY ? form.customCategory : form.category)}`} />
+              <span>Se asigna automáticamente según la categoría.</span>
             </div>
 
             {error && <p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/20 p-2 text-xs text-rose-200">{error}</p>}
