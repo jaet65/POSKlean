@@ -2096,7 +2096,7 @@ export default function App() {
                       <th className="px-4 py-3">Categoría</th>
                       <th className="px-4 py-3">Stock Actual</th>
                       <th className="px-4 py-3">Mínimo (Alerta)</th>
-                      <th className="px-4 py-3">Costo / Unidad</th>
+                      {!isCajero && <th className="px-4 py-3">Costo / Unidad</th>}
                       <th className="px-4 py-3">Precio Venta</th>
                       <th className="px-4 py-3 text-right">Acción</th>
                     </tr>
@@ -2104,7 +2104,7 @@ export default function App() {
                   <tbody className="divide-y divide-slate-700/60">
                     {products.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
+                        <td colSpan={isCajero ? 6 : 7} className="px-4 py-12 text-center text-slate-400">
                           <Package className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                           <p className="font-semibold text-slate-200 text-sm">No hay productos registrados en el inventario</p>
                           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
@@ -2143,7 +2143,7 @@ export default function App() {
                           <React.Fragment key={p.id}>
                             {startsStoreGroup && (
                               <tr className="bg-cyan-500/10 border-y border-cyan-500/20">
-                                <td colSpan={7} className="px-4 py-2 text-xs font-bold text-cyan-300">
+                                <td colSpan={isCajero ? 6 : 7} className="px-4 py-2 text-xs font-bold text-cyan-300">
                                   <Store className="inline-block w-4 h-4 mr-1.5 -mt-0.5" />
                                   {storeName}
                                 </td>
@@ -2243,7 +2243,7 @@ export default function App() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-3 font-mono">{formatCurrency(p.cost)}</td>
+                            {!isCajero && <td className="px-4 py-3 font-mono">{formatCurrency(p.cost)}</td>}
                             <td className="px-4 py-3 font-mono text-cyan-400 font-bold">
                               {isStoreManager && editingPriceProductId === p.id ? (
                                 <form onSubmit={(event) => handleSavePrice(event, p)} className="flex items-center gap-1.5">
