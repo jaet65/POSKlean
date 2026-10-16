@@ -121,6 +121,14 @@ export default function App() {
   
   // POS State
   const [cart, setCart] = useState([]);
+  const cartListRef = useRef(null);
+  const [lastCartTouch, setLastCartTouch] = useState({ id: null, n: 0 });
+  // Muestra siempre el producto agregado o incrementado más recientemente.
+  useEffect(() => {
+    if (!lastCartTouch.id) return;
+    const row = [...(cartListRef.current?.children || [])].find((el) => el.dataset.cartId === lastCartTouch.id);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [lastCartTouch]);
   const [cartQuantityDrafts, setCartQuantityDrafts] = useState({});
   const [selectedChannel, setSelectedChannel] = useState('Mostrador');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -566,6 +574,7 @@ export default function App() {
       return;
     }
 
+    setLastCartTouch((previous) => ({ id: product.id, n: previous.n + 1 }));
     setCart(existingItem
       ? cart.map((item) => item.id === product.id
         ? { ...item, qty: nextQuantity, total: Number((nextQuantity * product.price).toFixed(2)) }
@@ -1757,7 +1766,7 @@ export default function App() {
               </div>
 
               {/* Product Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
                 {filteredProducts.map(prod => {
                   const isLow = prod.currentStock <= prod.minStock;
                   const isOutOfStock = Number(prod.currentStock) === 0;
@@ -1768,7 +1777,7 @@ export default function App() {
                       key={prod.id}
                       disabled={isGeneralView || isOutOfStock || !isCashShiftOpen}
                       onClick={() => handleSelectProductToCart(prod)}
-                      className={`text-left p-3.5 rounded-2xl border transition-all flex flex-col justify-between relative group ${
+                      className={`text-left p-2.5 rounded-xl border transition-all flex flex-col justify-between relative group ${
                         isSelected 
                           ? 'bg-slate-800 border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg' 
                           : isOutOfStock
@@ -1777,8 +1786,8 @@ export default function App() {
                       }`}
                     >
                       <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`w-3 h-3 rounded-full ${prod.color}`} />
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`w-2.5 h-2.5 rounded-full ${prod.color}`} />
                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
                             isOutOfStock
                               ? 'bg-red-500/20 border-red-500/30 text-red-300'
@@ -1789,19 +1798,19 @@ export default function App() {
                             {prod.currentStock} {prod.unit}
                           </span>
                         </div>
-                        <h3 className="font-semibold text-sm text-slate-100 line-clamp-2 leading-snug mb-1">
+                        <h3 className="font-semibold text-xs text-slate-100 line-clamp-2 leading-snug mb-0.5">
                           {prod.name}
                         </h3>
                         {prod.description && (
-                          <p title={prod.description} className="text-[11px] text-slate-400 line-clamp-2 leading-snug">
+                          <p title={prod.description} className="text-[10px] text-slate-400 line-clamp-2 leading-snug">
                             {prod.description}
                           </p>
                         )}
                       </div>
 
-                      <div className="mt-3 pt-2 border-t border-slate-700/60 flex items-center justify-between">
-                        <span className="text-xs text-slate-400">x {prod.unit}</span>
-                        <span className="text-base font-bold text-cyan-400">{formatCurrency(prod.price)}</span>
+                      <div className="mt-2 pt-1.5 border-t border-slate-700/60 flex items-center justify-between">
+                        <span className="text-[11px] text-slate-400">x {prod.unit}</span>
+                        <span className="text-sm font-bold text-cyan-400">{formatCurrency(prod.price)}</span>
                       </div>
                     </button>
                   );
@@ -1861,7 +1870,7 @@ export default function App() {
                   </div>
 
                   {/* Cart Items List */}
-                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                  <div ref={cartListRef} className="space-y-2 max-h-52 overflow-y-auto pr-1">
                     {cart.length === 0 ? (
                       <div className="text-center py-8 text-slate-500 text-xs">
                         El carrito está vacío. Haz clic en los productos para comenzar a cobras.
@@ -1870,7 +1879,7 @@ export default function App() {
                       cart.map(item => {
                         const productStock = products.find((product) => product.id === item.id)?.currentStock;
                         return (
-                          <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
+                          <div key={item.id} data-cart-id={item.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-200 line-clamp-1">{item.name}</p>
                               <p className="text-slate-400 text-[11px]">{formatCurrency(item.price)} / {item.unit}</p>
