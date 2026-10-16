@@ -63,7 +63,8 @@ rules_version = '2';
 //   items: list of {productId, productName, unit, qtyOrdered, qtyReceived, unitCostCents};
 //   totalCents, receivedCents: int; notes?: string; createdBy: map;
 //   createdAt, updatedAt: timestamp; receivedAt?, closedAt?, cancelledAt?: timestamp
-//   Only admins and supervisors read or write suppliers and purchase orders.
+//   Suppliers are managed by admins and supervisors; cashiers may read and receive
+//   orders belonging to their assigned active store.
 //
 // Known limits: stock/price numbers written by the client cannot be fully
 // verified server-side; a malicious cashier of a store could still alter stock or
@@ -210,6 +211,13 @@ service cloud.firestore {
 
     function canOperateStore(storeId) {
       return canAccessStore(storeId) && isActiveStore(storeId);
+    }
+
+    function isCashierForStore(storeId) {
+      return isActiveStaff()
+        && profile().role == 'cajero'
+        && profile().get('storeId', '') == storeId
+        && isActiveStore(storeId);
     }
 
     function canOperatePOS() {
@@ -703,19 +711,22 @@ service cloud.firestore {
 
       allow update: if request.resource.data.storeId == resource.data.get('storeId', null)
         && request.resource.data.catalogId == resource.data.get('catalogId', null)
-        && canOperateStore(resource.data.get('storeId', null))
         && validNonNegative(request.resource.data.currentStock)
         && validNonNegative(request.resource.data.minStock)
         && (
           // Sales, restocks and audits adjust stock (and its audit trail) only.
-          changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt'])
+          (canOperateStore(resource.data.get('storeId', null))
+            && changedKeys().hasOnly(['currentStock', 'lastRestockedBy', 'lastRestockedAt']))
           // Purchase receipts also refresh the unit cost and, optionally, the store price.
-          || (isPurchasingStaff()
+          || (isPurchasingStaff() && canOperateStore(resource.data.get('storeId', null))
             && changedKeys().hasOnly(['currentStock', 'cost', 'priceOverride', 'lastRestockedBy',
               'lastRestockedAt'])
             && hasValidStockFields(request.resource.data))
+          || (isCashierForStore(resource.data.get('storeId', null))
+            && changedKeys().hasOnly(['currentStock', 'cost', 'lastRestockedBy', 'lastRestockedAt'])
+            && hasValidStockFields(request.resource.data))
           // Only admins change the alert threshold.
-          || (isAdmin()
+          || (isAdmin() && canOperateStore(resource.data.get('storeId', null))
             && changedKeys().hasOnly(['currentStock', 'minStock', 'cost', 'priceOverride',
               'lastRestockedBy', 'lastRestockedAt', 'minStockUpdatedBy', 'minStockUpdatedAt'])
             && hasValidStockFields(request.resource.data))
@@ -736,12 +747,14 @@ service cloud.firestore {
 
     match /inventoryMovements/{movementId} {
       allow read: if canAccessStore(resource.data.get('storeId', null));
-      allow create: if canOperateStore(request.resource.data.storeId)
-        && isValidMovement(request.resource.data)
-        && (request.resource.data.type != 'audit' || isAdmin())
-        && (request.resource.data.type != 'purchase' || isPurchasingStaff())
-        && (!(request.resource.data.type in ['transfer_out', 'transfer_in'])
-          || isPurchasingStaff());
+      allow create: if isValidMovement(request.resource.data)
+        && ((request.resource.data.type == 'purchase'
+            && isCashierForStore(request.resource.data.storeId))
+          || (canOperateStore(request.resource.data.storeId)
+            && (request.resource.data.type != 'audit' || isAdmin())
+            && (request.resource.data.type != 'purchase' || isPurchasingStaff())
+            && (!(request.resource.data.type in ['transfer_out', 'transfer_in'])
+              || isPurchasingStaff())));
       allow update, delete: if false;
     }
 
@@ -753,15 +766,18 @@ service cloud.firestore {
     }
 
     match /purchaseOrders/{orderId} {
-      allow read: if isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null));
+      allow read: if (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
+        || isCashierForStore(resource.data.get('storeId', null));
       allow create: if isPurchasingStaff()
         && canOperateStore(request.resource.data.storeId)
         && isNewPurchaseOrder(request.resource.data);
-      allow update: if isPurchasingStaff()
-        && canOperateStore(resource.data.get('storeId', null))
-        && (isPurchaseOrderReceipt(resource.data, request.resource.data)
-          || isPurchaseOrderCancellation(resource.data, request.resource.data)
-          || isPartialPurchaseOrderClosure(resource.data, request.resource.data));
+      allow update: if (isCashierForStore(resource.data.get('storeId', null))
+          && isPurchaseOrderReceipt(resource.data, request.resource.data))
+        || (isPurchasingStaff()
+          && canOperateStore(resource.data.get('storeId', null))
+            && (isPurchaseOrderReceipt(resource.data, request.resource.data)
+              || isPurchaseOrderCancellation(resource.data, request.resource.data)
+              || isPartialPurchaseOrderClosure(resource.data, request.resource.data)));
       allow delete: if false;
     }
   }

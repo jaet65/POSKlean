@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, PackagePlus, Plus, Trash2, Truck, Upload, Users, X } from 'lucide-react';
+import { Download, PackagePlus, Plus, Printer, Trash2, Truck, Upload, Users, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { parsePurchaseOrderCsv, PURCHASE_ORDER_CSV_TEMPLATE } from '../utils/purchaseOrderCsv';
 import {
@@ -65,7 +65,9 @@ function Modal({ title, subtitle, onClose, busy, children, wide = false }) {
   );
 }
 
-export default function PurchasingPanel({ currentUser, activeStoreId, stores = [], products, catalog = [] }) {
+export default function PurchasingPanel({ currentUser, activeStoreId, stores = [], products, catalog = [], onPrintOrder }) {
+  const isCashier = currentUser?.role === 'cajero';
+  const canManagePurchases = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
   const [section, setSection] = useState('orders');
   const [suppliers, setSuppliers] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -73,6 +75,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const visibleSection = canManagePurchases ? section : 'orders';
 
   const [supplierModal, setSupplierModal] = useState(null); // { id?, ...fields }
   const [orderModalOpen, setOrderModalOpen] = useState(false);
@@ -82,10 +85,13 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const [receiveModal, setReceiveModal] = useState(null); // { order, inputs }
   const [expandedOrderId, setExpandedOrderId] = useState(null);
 
-  useEffect(() => subscribeToSuppliers(
-    (list) => { setSuppliers(list); setLoadError(''); },
-    (error) => setLoadError(`No se pudieron cargar los proveedores: ${error.message}`),
-  ), []);
+  useEffect(() => {
+    if (!canManagePurchases) return undefined;
+    return subscribeToSuppliers(
+      (list) => { setSuppliers(list); setLoadError(''); },
+      (error) => setLoadError(`No se pudieron cargar los proveedores: ${error.message}`),
+    );
+  }, [canManagePurchases]);
 
   const storeIdsKey = activeStoreId || stores.map((store) => store.id).join('|');
   useEffect(() => subscribeToPurchaseOrders(
@@ -97,6 +103,10 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const storeNameById = useMemo(
     () => new Map(stores.map((store) => [store.id, store.name])),
     [stores],
+  );
+  const visibleOrders = useMemo(
+    () => orders.filter((order) => !isCashier || ['pending', 'partial', 'received'].includes(order.status)),
+    [orders, isCashier],
   );
   const activeSuppliers = useMemo(
     () => suppliers.filter((supplier) => supplier.status !== 'archived'),
@@ -438,7 +448,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   };
 
   const tabClass = (id) => `flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
-    section === id
+    visibleSection === id
       ? 'bg-cyan-500 text-slate-950 font-semibold'
       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
   }`;
@@ -450,11 +460,13 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           <button type="button" onClick={() => setSection('orders')} className={tabClass('orders')}>
             <Truck className="h-4 w-4" /> Órdenes de compra
           </button>
-          <button type="button" onClick={() => setSection('suppliers')} className={tabClass('suppliers')}>
-            <Users className="h-4 w-4" /> Proveedores
-          </button>
+          {canManagePurchases && (
+            <button type="button" onClick={() => setSection('suppliers')} className={tabClass('suppliers')}>
+              <Users className="h-4 w-4" /> Proveedores
+            </button>
+          )}
         </div>
-        {section === 'orders' ? (
+        {canManagePurchases && section === 'orders' ? (
           <button
             type="button"
             onClick={openOrderModal}
@@ -463,7 +475,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           >
             <Plus className="h-4 w-4" /> Nueva orden
           </button>
-        ) : (
+        ) : canManagePurchases ? (
           <button
             type="button"
             onClick={() => openSupplierModal()}
@@ -471,7 +483,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           >
             <Plus className="h-4 w-4" /> Nuevo proveedor
           </button>
-        )}
+        ) : null}
       </div>
 
       {loadError && (
@@ -484,7 +496,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
         <p role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{actionError}</p>
       )}
 
-      {section === 'suppliers' && (
+      {canManagePurchases && section === 'suppliers' && (
         <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800">
           {suppliers.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">Aún no hay proveedores. Agrega el primero.</p>
@@ -544,7 +556,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
         </div>
       )}
 
-      {section === 'orders' && (
+      {visibleSection === 'orders' && (
         stores.length === 0 ? (
           <p className="rounded-2xl border border-slate-700 bg-slate-800 py-10 text-center text-sm text-slate-400">
             No hay tiendas activas para registrar órdenes de compra.
@@ -556,16 +568,16 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                 ? <>Tienda: <strong className="text-slate-200">{storeNameById.get(activeStoreId) || ''}</strong></>
                 : 'Mostrando las órdenes de todas las tiendas activas.'}
             </p>
-            {activeSuppliers.length === 0 && (
+            {canManagePurchases && activeSuppliers.length === 0 && (
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
                 Agrega al menos un proveedor activo para crear órdenes de compra.
               </p>
             )}
-            {orders.length === 0 ? (
+            {visibleOrders.length === 0 ? (
               <p className="rounded-2xl border border-slate-700 bg-slate-800 py-10 text-center text-sm text-slate-400">
-                Esta tienda aún no tiene órdenes de compra.
+                {isCashier ? 'No hay órdenes de compra para esta tienda.' : 'Esta tienda aún no tiene órdenes de compra.'}
               </p>
-            ) : orders.map((order) => {
+            ) : visibleOrders.map((order) => {
               const status = STATUS_LABELS[order.status] || STATUS_LABELS.pending;
               const isOpen = expandedOrderId === order.id;
               const canReceive = order.status === 'pending' || order.status === 'partial';
@@ -581,12 +593,14 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                         {order.supplierName} · {storeNameById.get(order.storeId) || 'Tienda'} · {order.createdAtLabel} · {order.createdBy?.userName || 'Desconocido'}
                       </p>
                     </div>
-                    <div className="text-right text-xs">
-                      <p className="font-mono text-base font-bold text-cyan-400">{formatCurrency((order.totalCents || 0) / 100)}</p>
-                      {order.receivedCents > 0 && (
-                        <p className="text-slate-400">Recibido {formatCurrency(order.receivedCents / 100)}</p>
-                      )}
-                    </div>
+                    {canManagePurchases && (
+                      <div className="text-right text-xs">
+                        <p className="font-mono text-base font-bold text-cyan-400">{formatCurrency((order.totalCents || 0) / 100)}</p>
+                        {order.receivedCents > 0 && (
+                          <p className="text-slate-400">Recibido {formatCurrency(order.receivedCents / 100)}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
@@ -595,6 +609,13 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                       className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
                     >
                       {isOpen ? 'Ocultar detalle' : 'Ver detalle'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onPrintOrder?.(order, isCashier)}
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                    >
+                      <Printer className="h-3.5 w-3.5" /> Imprimir
                     </button>
                     {canReceive && (
                       <button
@@ -605,7 +626,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                         <PackagePlus className="h-3.5 w-3.5" /> Recibir
                       </button>
                     )}
-                    {order.status === 'pending' && (
+                    {canManagePurchases && order.status === 'pending' && (
                       <button
                         type="button"
                         onClick={() => handleCancelOrder(order)}
@@ -615,7 +636,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                         Cancelar orden
                       </button>
                     )}
-                    {order.status === 'partial' && (
+                    {canManagePurchases && order.status === 'partial' && (
                       <button
                         type="button"
                         onClick={() => handleClosePartialOrder(order)}
@@ -634,7 +655,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                             <th className="px-3 py-2">Producto</th>
                             <th className="px-3 py-2">Pedido</th>
                             <th className="px-3 py-2">Recibido</th>
-                            <th className="px-3 py-2">Costo unit.</th>
+                            {canManagePurchases && <th className="px-3 py-2">Costo unit.</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-700/60">
@@ -643,7 +664,9 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                               <td className="px-3 py-2 text-slate-100">{item.productName}</td>
                               <td className="px-3 py-2 font-mono">{item.qtyOrdered} {item.unit}</td>
                               <td className="px-3 py-2 font-mono">{item.qtyReceived} {item.unit}</td>
-                              <td className="px-3 py-2 font-mono">{formatCurrency(item.unitCostCents / 100)}</td>
+                              {canManagePurchases && (
+                                <td className="px-3 py-2 font-mono">{formatCurrency(item.unitCostCents / 100)}</td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -931,7 +954,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                     <th className="px-2 py-2">Producto</th>
                     <th className="px-2 py-2">Pendiente</th>
                     <th className="px-2 py-2">Recibido ahora</th>
-                    <th className="px-2 py-2">Costo unit. ($)</th>
+                    {canManagePurchases && <th className="px-2 py-2">Costo unit. ($)</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/60">
@@ -954,7 +977,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                             className={`${inputClass} w-28`}
                           />
                         </td>
-                        <td className="px-2 py-2">
+                        {canManagePurchases && <td className="px-2 py-2">
                           <input
                             aria-label={`Costo unitario de ${item.productName}`}
                             type="number"
@@ -965,14 +988,18 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                             onChange={(event) => updateReceiveInput(index, { unitCost: event.target.value })}
                             className={`${inputClass} w-28`}
                           />
-                        </td>
+                        </td>}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <p className="text-[11px] text-slate-400">Al recibir se suma el stock y el costo del producto pasa a ser el promedio ponderado entre el stock actual y lo recibido.</p>
+            <p className="text-[11px] text-slate-400">
+              {isCashier
+                ? 'Al registrar la recepción, las cantidades se agregarán al inventario de esta tienda.'
+                : 'Al recibir se suma el stock y el costo del producto pasa a ser el promedio ponderado entre el stock actual y lo recibido.'}
+            </p>
             </>
             )}
             {actionError && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">{actionError}</p>}

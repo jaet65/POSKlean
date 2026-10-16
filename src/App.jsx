@@ -213,7 +213,10 @@ export default function App() {
   const canAccessSales = currentUser?.role === 'admin' || currentUser?.permissions?.sales;
   const currentUserId = currentUser?.id || currentUser?.uid || null;
   const isStoreManager = currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
-  const canAccessPurchases = isStoreManager && currentUser?.status === 'active';
+  const isCashier = currentUser?.role === 'cajero';
+  const canAccessPurchases = currentUser?.status === 'active'
+    && (isStoreManager || (isCashier && Boolean(currentUser?.storeId)));
+  const canAccessCatalog = currentUser?.status === 'active' && isStoreManager;
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const isGeneralView = isStoreManager && !selectedStoreId;
   const canUsePos = canAccessPos && !isGeneralView;
@@ -287,7 +290,7 @@ export default function App() {
     inventory: canAccessInventory,
     sales: canAccessSales,
     purchases: canAccessPurchases,
-    catalog: canAccessPurchases,
+    catalog: canAccessCatalog,
     users: canAccessUsers,
   };
   const fallbackTabs = {
@@ -1618,7 +1621,7 @@ export default function App() {
             </button>
           )}
 
-          {canAccessPurchases && (
+          {canAccessCatalog && (
             <button
               type="button"
               onClick={() => setActiveTab('catalog')}
@@ -1966,10 +1969,14 @@ export default function App() {
             stores={activeStores}
             products={products}
             catalog={catalog}
+            onPrintOrder={(order, hideCosts) => setTicketToPrint({
+              type: 'purchaseOrder',
+              data: { ...order, hideCosts },
+            })}
           />
         )}
 
-        {visibleTab === 'catalog' && canAccessPurchases && (
+        {visibleTab === 'catalog' && canAccessCatalog && (
           <CatalogPanel
             currentUser={currentUser}
             catalog={catalog}

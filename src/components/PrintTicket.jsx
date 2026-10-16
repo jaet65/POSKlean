@@ -2,6 +2,13 @@ import { Droplet } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { formatOtherUnits } from '../utils/volume';
 
+const formatTicketDate = (value) => {
+  const date = value?.toDate ? value.toDate() : value instanceof Date ? value : value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+    : 'Fecha no disponible';
+};
+
 export default function PrintTicket({ ticket, receiptWidth, stores }) {
   if (!ticket) return null;
 
@@ -13,7 +20,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
   return (
     <section
       className={`print-ticket receipt-${receiptWidth}`}
-      aria-label={`Ticket de ${type === 'sale' ? 'venta' : type === 'audit' ? 'auditoría' : 'cierre'} para imprimir`}
+      aria-label={`Ticket de ${type === 'sale' ? 'venta' : type === 'audit' ? 'auditoría' : type === 'purchaseOrder' ? 'orden de compra' : 'cierre'} para imprimir`}
     >
       <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
         <Droplet size={20} strokeWidth={2.5} aria-hidden="true" />
@@ -59,6 +66,55 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           <hr />
           <p className="receipt-thanks">¡Gracias por su compra!</p>
           <hr />
+        </>
+      )}
+
+      {type === 'purchaseOrder' && (
+        <>
+          <p className="receipt-thanks"><strong>ORDEN DE COMPRA</strong></p>
+          <hr />
+          <div className="receipt-item"><span>Orden</span><strong>{data.orderNumber}</strong></div>
+          <div className="receipt-item"><span>Fecha</span><strong>{formatTicketDate(data.createdAt)}</strong></div>
+          <div className="receipt-item">
+            <span>Tienda</span>
+            <strong>{stores.find((store) => store.id === data.storeId)?.name || data.storeId || '—'}</strong>
+          </div>
+          <div className="receipt-item"><span>Proveedor</span><strong>{data.supplierName || '—'}</strong></div>
+          <div className="receipt-item">
+            <span>Estado</span>
+            <strong>{{ pending: 'Pendiente', partial: 'Recepción parcial', received: 'Recibida', closed: 'Cerrada parcial', cancelled: 'Cancelada' }[data.status] || '—'}</strong>
+          </div>
+          <hr />
+          <p><strong>Productos ({data.items.length})</strong></p>
+          {data.items.map((item) => {
+            const qtyOrdered = Number(item.qtyOrdered) || 0;
+            const qtyReceived = Number(item.qtyReceived) || 0;
+            const qtyPending = Math.max(0, qtyOrdered - qtyReceived);
+            return (
+              <div key={item.productId} style={{ display: 'flex', flexDirection: 'column', gap: '2px', margin: '8px 0' }}>
+                <strong>{item.productName}</strong>
+                {!data.hideCosts && (
+                  <span>{qtyOrdered} {item.unit} × {formatCurrency(item.unitCostCents / 100)} MXN</span>
+                )}
+                <span>Recibido: {qtyReceived} {item.unit} · Pendiente: {qtyPending.toFixed(2)} {item.unit}</span>
+                {!data.hideCosts && (
+                  <strong style={{ textAlign: 'right' }}>
+                    {formatCurrency((qtyOrdered * item.unitCostCents) / 100)} MXN
+                  </strong>
+                )}
+              </div>
+            );
+          })}
+          {!data.hideCosts && (
+            <>
+              <hr />
+              <div className="receipt-item"><span>Importe de la orden</span><strong>{formatCurrency((data.totalCents || 0) / 100)} MXN</strong></div>
+              <div className="receipt-item"><span>Importe recibido</span><strong>{formatCurrency((data.receivedCents || 0) / 100)} MXN</strong></div>
+            </>
+          )}
+          {data.notes && <><hr /><p><strong>Notas:</strong> {data.notes}</p></>}
+          <hr />
+          <p className="receipt-thanks">Generado por {data.createdBy?.userName || 'Desconocido'}</p>
         </>
       )}
 
