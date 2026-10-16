@@ -73,7 +73,116 @@ export function subscribeToPurchaseOrders(storeIds, onData, onError) {
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
-export async function createPurchaseOrder({ storeId, supplier, lines, notes = '', products, catalog = [], user }) {
+export function subscribeToPurchaseRequests(storeIds, onData, onError) {
+  const ids = [...new Set((Array.isArray(storeIds) ? storeIds : [storeIds]).filter(Boolean))];
+  if (!db || ids.length === 0) {
+    onData([]);
+    return () => {};
+  }
+  const byStore = new Map();
+  const emit = () => {
+    onData([...byStore.values()].flat().sort((a, b) => b.createdAtMs - a.createdAtMs));
+  };
+  const unsubscribers = ids.map((storeId) => onSnapshot(
+    query(collection(db, 'purchaseRequests'), where('storeId', '==', storeId)),
+    (snapshot) => {
+      byStore.set(storeId, snapshot.docs.map((requestDoc) => {
+        const data = requestDoc.data();
+        const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : null;
+        return {
+          ...data,
+          id: requestDoc.id,
+          createdAtMs: createdAt ? createdAt.getTime() : 0,
+          createdAtLabel: createdAt
+            ? createdAt.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+            : 'Fecha no disponible',
+        };
+      }));
+      emit();
+    },
+    onError,
+  ));
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+}
+
+export async function createPurchaseRequest({ storeId, product, supplierId, qtyRequested, user }) {
+  if (!db) throw new Error('Firestore no está inicializado.');
+  if (!['admin', 'supervisor', 'cajero'].includes(user?.role)) {
+    throw new Error('No tienes permiso para solicitar una compra.');
+  }
+  if (!storeId || product?.storeId !== storeId || !product?.id || !product?.catalogId || !supplierId) {
+    throw new Error('Producto, proveedor y tienda son obligatorios para solicitar una compra.');
+  }
+  if (!validQuantity(qtyRequested)) {
+    throw new Error('La cantidad solicitada debe ser mayor a 0 y tener máximo dos decimales.');
+  }
+
+  const requestRef = doc(collection(db, 'purchaseRequests'));
+  const now = serverTimestamp();
+  await runTransaction(db, async (transaction) => {
+    transaction.set(requestRef, {
+      requestNumber: `SC-${requestRef.id.slice(0, 8).toUpperCase()}`,
+      storeId,
+      supplierId,
+      items: [{
+        productId: product.id,
+        catalogId: product.catalogId,
+        productName: String(product.name || '').slice(0, 120),
+        unit: String(product.unit || 'L').slice(0, 10),
+        qtyRequested: Number(qtyRequested.toFixed(2)),
+      }],
+      status: 'pending',
+      requestedBy: userInfo(user),
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+  return requestRef.id;
+}
+
+export async function rejectPurchaseRequests(requestIds, user) {
+  if (!db) throw new Error('Firestore no está inicializado.');
+  if (!['admin', 'supervisor'].includes(user?.role)) {
+    throw new Error('Solo administradores y supervisores pueden revisar solicitudes.');
+  }
+  const ids = [...new Set((Array.isArray(requestIds) ? requestIds : []).filter(Boolean))];
+  if (ids.length === 0 || ids.length > MAX_LINES) throw new Error('La solicitud no es válida.');
+  const refs = ids.map((requestId) => doc(db, 'purchaseRequests', requestId));
+  const now = serverTimestamp();
+  await runTransaction(db, async (transaction) => {
+    const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+    let groupStoreId = null;
+    let groupSupplierId = null;
+    snapshots.forEach((snapshot) => {
+      if (!snapshot.exists() || snapshot.data().status !== 'pending') {
+        throw new Error('Una o más solicitudes ya fueron procesadas. Actualiza la lista e inténtalo de nuevo.');
+      }
+      const request = snapshot.data();
+      if (groupStoreId && (request.storeId !== groupStoreId || request.supplierId !== groupSupplierId)) {
+        throw new Error('Solo puedes rechazar solicitudes de la misma tienda y proveedor.');
+      }
+      groupStoreId = request.storeId;
+      groupSupplierId = request.supplierId;
+    });
+    refs.forEach((ref) => transaction.update(ref, {
+      status: 'rejected',
+      processedBy: userInfo(user),
+      processedAt: now,
+      updatedAt: now,
+    }));
+  });
+}
+
+export async function createPurchaseOrder({
+  storeId,
+  supplier,
+  lines,
+  notes = '',
+  products,
+  catalog = [],
+  user,
+  requestIds = [],
+}) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if (!storeId) throw new Error('Selecciona una tienda para la orden de compra.');
   if (!supplier?.id || supplier.status === 'archived') {
@@ -83,6 +192,11 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
     throw new Error('Agrega al menos un producto a la orden.');
   }
   if (lines.length > MAX_LINES) throw new Error(`Una orden admite máximo ${MAX_LINES} productos.`);
+  const purchaseRequestIds = [...new Set((Array.isArray(requestIds) ? requestIds : []).filter(Boolean))];
+  if (purchaseRequestIds.length > MAX_LINES) throw new Error(`Una aprobación admite máximo ${MAX_LINES} solicitudes.`);
+  if (purchaseRequestIds.length > 0 && !['admin', 'supervisor'].includes(user?.role)) {
+    throw new Error('Solo administradores y supervisores pueden aprobar solicitudes.');
+  }
 
   const seen = new Set();
   const newProductNames = new Set();
@@ -269,6 +383,9 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
     (sum, item) => sum + Math.round(item.qtyOrdered * item.unitCostCents),
     0,
   );
+  if (purchaseRequestIds.length > 0 && newProducts.length > 0) {
+    throw new Error('Las solicitudes solo pueden incluir productos que ya existen en el inventario.');
+  }
   if (totalCents > MAX_TOTAL_CENTS) throw new Error('El total de la orden es demasiado alto.');
 
   let productsToStage = newProducts;
@@ -288,6 +405,7 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
   }
 
   const orderRef = doc(collection(db, 'purchaseOrders'));
+  const requestRefs = purchaseRequestIds.map((requestId) => doc(db, 'purchaseRequests', requestId));
   const createdAt = serverTimestamp();
   let stagedProducts = 0;
   const alreadyStagedProducts = newProducts.length - productsToStage.length;
@@ -304,6 +422,20 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
     }
 
     await runTransaction(db, async (transaction) => {
+      const requestSnapshots = await Promise.all(requestRefs.map((ref) => transaction.get(ref)));
+      requestSnapshots.forEach((snapshot) => {
+        if (!snapshot.exists()) throw new Error('Una solicitud ya no existe.');
+        const request = snapshot.data();
+        if (request.status !== 'pending' || request.storeId !== storeId || request.supplierId !== supplier.id) {
+          throw new Error('Las solicitudes deben estar pendientes y pertenecer a la misma tienda y proveedor.');
+        }
+        if (!Array.isArray(request.items) || request.items.length !== 1) {
+          throw new Error('Una solicitud contiene productos inválidos.');
+        }
+        const requestedItem = request.items[0];
+        if (!validQuantity(requestedItem.qtyRequested)) throw new Error('Una cantidad solicitada no es válida.');
+      });
+
       transaction.set(orderRef, {
         storeId,
         supplierId: supplier.id,
@@ -318,6 +450,13 @@ export async function createPurchaseOrder({ storeId, supplier, lines, notes = ''
         createdAt,
         updatedAt: createdAt,
       });
+      requestRefs.forEach((ref) => transaction.update(ref, {
+        status: 'approved',
+        purchaseOrderId: orderRef.id,
+        processedBy: userInfo(user),
+        processedAt: createdAt,
+        updatedAt: createdAt,
+      }));
     });
   } catch (error) {
     const availableProducts = stagedProducts + alreadyStagedProducts;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, PackagePlus, Plus, Printer, Trash2, Truck, Upload, Users, X } from 'lucide-react';
+import { Check, Download, PackagePlus, Plus, Printer, Trash2, Truck, Upload, Users, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { parsePurchaseOrderCsv, PURCHASE_ORDER_CSV_TEMPLATE } from '../utils/purchaseOrderCsv';
 import {
@@ -12,7 +12,9 @@ import {
   cancelPurchaseOrder,
   closePartialPurchaseOrder,
   createPurchaseOrder,
+  rejectPurchaseRequests,
   receivePurchaseOrder,
+  subscribeToPurchaseRequests,
   subscribeToPurchaseOrders,
   suggestedSalePrice,
   weightedAverageCost,
@@ -71,6 +73,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   const [section, setSection] = useState('orders');
   const [suppliers, setSuppliers] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [purchaseRequests, setPurchaseRequests] = useState([]);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,6 +82,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
 
   const [supplierModal, setSupplierModal] = useState(null); // { id?, ...fields }
   const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [approvalModal, setApprovalModal] = useState(null); // { group, lines }
   const [orderForm, setOrderForm] = useState({ storeId: '', supplierId: '', notes: '', lines: [] });
   const [csvImportReport, setCsvImportReport] = useState(null);
   const orderCsvInputRef = useRef(null);
@@ -100,6 +104,15 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
     (error) => setLoadError(`No se pudieron cargar las órdenes de compra: ${error.message}`),
   ), [storeIdsKey]);
 
+  useEffect(() => {
+    if (!canManagePurchases) return undefined;
+    return subscribeToPurchaseRequests(
+      storeIdsKey ? storeIdsKey.split('|') : [],
+      (list) => { setPurchaseRequests(list); setLoadError(''); },
+      (error) => setLoadError(`No se pudieron cargar las solicitudes: ${error.message}`),
+    );
+  }, [canManagePurchases, storeIdsKey]);
+
   const storeNameById = useMemo(
     () => new Map(stores.map((store) => [store.id, store.name])),
     [stores],
@@ -108,6 +121,46 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
     () => orders.filter((order) => !isCashier || ['pending', 'partial', 'received'].includes(order.status)),
     [orders, isCashier],
   );
+  const pendingRequestGroups = useMemo(() => {
+    const groups = new Map();
+    purchaseRequests.filter((request) => request.status === 'pending').forEach((request) => {
+      const key = `${request.storeId}|${request.supplierId}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          storeId: request.storeId,
+          supplierId: request.supplierId,
+          requests: [],
+          itemsByProduct: new Map(),
+          requesters: new Set(),
+        });
+      }
+      const group = groups.get(key);
+      group.requests.push(request);
+      if (request.requestedBy?.userName) group.requesters.add(request.requestedBy.userName);
+      (request.items || []).forEach((item) => {
+        const existing = group.itemsByProduct.get(item.productId);
+        if (existing) {
+          existing.qtyRequested = Number((existing.qtyRequested + Number(item.qtyRequested)).toFixed(2));
+          existing.requestIds.push(request.id);
+        } else {
+          group.itemsByProduct.set(item.productId, {
+            ...item,
+            qtyRequested: Number(item.qtyRequested),
+            requestIds: [request.id],
+          });
+        }
+      });
+    });
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        items: [...group.itemsByProduct.values()],
+        requests: group.requests.sort((a, b) => a.createdAtMs - b.createdAtMs),
+        requesters: [...group.requesters],
+      }))
+      .sort((a, b) => (b.requests.at(-1)?.createdAtMs || 0) - (a.requests.at(-1)?.createdAtMs || 0));
+  }, [purchaseRequests]);
   const activeSuppliers = useMemo(
     () => suppliers.filter((supplier) => supplier.status !== 'archived'),
     [suppliers],
@@ -131,6 +184,14 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   );
 
   const catalogById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
+  const approvalProducts = useMemo(() => {
+    const group = approvalModal?.group;
+    if (!group) return [];
+    return products
+      .filter((product) => product.storeId === group.storeId
+        && catalogById.get(product.catalogId)?.supplierId === group.supplierId)
+      .sort((first, second) => String(first.name).localeCompare(String(second.name), 'es'));
+  }, [approvalModal, catalogById, products]);
   const lineSupplierId = useMemo(() => {
     for (const line of orderForm.lines) {
       const catalogId = line.catalogId || products.find((candidate) => candidate.id === line.productId)?.catalogId;
@@ -438,6 +499,110 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
     await run(() => closePartialPurchaseOrder(order.id, currentUser), 'Orden cerrada con recepción parcial.');
   };
 
+  const handleApproveRequestGroup = async (group) => {
+    const supplier = activeSuppliers.find((candidate) => candidate.id === group.supplierId);
+    if (!supplier) {
+      setActionError('El proveedor de esta solicitud no está activo. Reactívalo antes de aprobarla.');
+      return;
+    }
+    if (group.items.length > 50 || group.requests.length > 50) {
+      setActionError('Una orden admite máximo 50 productos o solicitudes. Divide esta solicitud antes de aprobarla.');
+      return;
+    }
+    const lines = group.items.map((item) => {
+      const product = products.find((candidate) => candidate.id === item.productId);
+      return {
+        productId: item.productId,
+        qty: String(item.qtyRequested),
+        unitCost: String(product?.cost ?? ''),
+        requestIds: item.requestIds,
+      };
+    });
+    setActionError('');
+    setApprovalModal({ group, lines });
+  };
+
+  const updateApprovalLine = (index, changes) => {
+    setApprovalModal((previous) => ({
+      ...previous,
+      lines: previous.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...changes } : line)),
+    }));
+  };
+
+  const handleApprovalProductPick = (index, productId) => {
+    const product = approvalProducts.find((candidate) => candidate.id === productId);
+    updateApprovalLine(index, {
+      productId,
+      unitCost: product ? String(product.cost ?? 0) : '',
+    });
+  };
+
+  const handleAddApprovalLine = () => {
+    const selectedIds = new Set(approvalModal.lines.map((line) => line.productId).filter(Boolean));
+    const product = approvalProducts.find((candidate) => !selectedIds.has(candidate.id));
+    if (!product) {
+      setActionError('No hay más productos de este proveedor disponibles en la tienda.');
+      return;
+    }
+    setActionError('');
+    setApprovalModal((previous) => ({
+      ...previous,
+      lines: [...previous.lines, { productId: product.id, qty: '', unitCost: String(product.cost ?? 0), requestIds: [] }],
+    }));
+  };
+
+  const handleSubmitApproval = async (event) => {
+    event.preventDefault();
+    if (!approvalModal || busy) return;
+    const { group } = approvalModal;
+    const supplier = activeSuppliers.find((candidate) => candidate.id === group.supplierId);
+    if (!supplier) {
+      setActionError('El proveedor de esta solicitud ya no está activo. Reactívalo antes de aprobarla.');
+      return;
+    }
+    const ok = await run(async () => {
+      const requestIds = [...new Set(approvalModal.lines.flatMap((line) => line.requestIds || []))];
+      if (requestIds.length === 0) throw new Error('Incluye al menos un producto de las solicitudes originales.');
+      if (approvalModal.lines.length === 0 || approvalModal.lines.length > 50) {
+        throw new Error('La orden debe incluir entre 1 y 50 productos.');
+      }
+      const seen = new Set();
+      const lines = approvalModal.lines.map((line) => {
+        const product = approvalProducts.find((candidate) => candidate.id === line.productId);
+        const qty = Number(line.qty);
+        const unitCost = Number(line.unitCost);
+        if (!product) throw new Error('Selecciona un producto vigente de esta tienda y proveedor en cada renglón.');
+        if (seen.has(product.id)) throw new Error(`${product.name} aparece más de una vez en la orden.`);
+        if (!Number.isFinite(qty) || qty <= 0 || Number((qty * 100).toFixed(0)) / 100 !== qty) {
+          throw new Error(`Indica una cantidad válida para ${product.name}.`);
+        }
+        if (!Number.isFinite(unitCost) || unitCost < 0 || Number((unitCost * 100).toFixed(0)) / 100 !== unitCost) {
+          throw new Error(`Indica un costo unitario válido para ${product.name}.`);
+        }
+        seen.add(product.id);
+        return { productId: product.id, qty, unitCost };
+      });
+      await createPurchaseOrder({
+        storeId: group.storeId,
+        supplier,
+        notes: `OC creada desde ${requestIds.length} solicitud(es) de resurtido.`,
+        products,
+        catalog,
+        user: currentUser,
+        requestIds,
+        lines,
+      });
+    }, 'Solicitudes aprobadas y orden de compra creada.');
+    if (ok) setApprovalModal(null);
+  };
+
+  const handleRejectRequestGroup = async (group) => {
+    const supplier = activeSuppliers.find((candidate) => candidate.id === group.supplierId);
+    const supplierName = supplier?.name || 'Proveedor archivado';
+    if (!window.confirm(`¿Rechazar ${group.requests.length} solicitud(es) de ${supplierName} para ${storeNameById.get(group.storeId) || 'esta tienda'}?`)) return;
+    await run(() => rejectPurchaseRequests(group.requests.map((request) => request.id), currentUser), 'Solicitudes rechazadas.');
+  };
+
   const handleToggleSupplier = async (supplier) => {
     const archiving = supplier.status !== 'archived';
     if (archiving && !window.confirm(`¿Archivar a "${supplier.name}"? No podrás crear órdenes nuevas con este proveedor.`)) return;
@@ -461,6 +626,14 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
             <Truck className="h-4 w-4" /> Órdenes de compra
           </button>
           {canManagePurchases && (
+            <button type="button" onClick={() => setSection('requests')} className={tabClass('requests')}>
+              <PackagePlus className="h-4 w-4" /> Solicitudes
+              {pendingRequestGroups.length > 0 && (
+                <span className="rounded-full bg-amber-400 px-1.5 text-[10px] font-bold text-slate-950">{pendingRequestGroups.length}</span>
+              )}
+            </button>
+          )}
+          {canManagePurchases && (
             <button type="button" onClick={() => setSection('suppliers')} className={tabClass('suppliers')}>
               <Users className="h-4 w-4" /> Proveedores
             </button>
@@ -475,7 +648,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           >
             <Plus className="h-4 w-4" /> Nueva orden
           </button>
-        ) : canManagePurchases ? (
+        ) : canManagePurchases && section === 'suppliers' ? (
           <button
             type="button"
             onClick={() => openSupplierModal()}
@@ -492,8 +665,79 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
       {notice && (
         <p role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{notice}</p>
       )}
-      {actionError && !supplierModal && !orderModalOpen && !receiveModal && (
+      {actionError && !supplierModal && !orderModalOpen && !approvalModal && !receiveModal && (
         <p role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{actionError}</p>
+      )}
+
+      {canManagePurchases && section === 'requests' && (
+        <div className="space-y-3">
+          {pendingRequestGroups.length === 0 ? (
+            <p className="rounded-2xl border border-slate-700 bg-slate-800 py-10 text-center text-sm text-slate-400">
+              No hay solicitudes de compra pendientes.
+            </p>
+          ) : pendingRequestGroups.map((group) => {
+            const supplier = suppliers.find((candidate) => candidate.id === group.supplierId);
+            const unavailableProduct = group.items.find((item) => (
+              !products.some((product) => product.id === item.productId && product.storeId === group.storeId)
+            ));
+            return (
+              <section key={group.key} className="rounded-xl border border-slate-700 bg-slate-800 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-white">
+                      {supplier?.name || 'Proveedor no disponible'}
+                      <span className="ml-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">{group.requests.length} solicitud(es)</span>
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {storeNameById.get(group.storeId) || 'Tienda'} · {group.requests.at(-1)?.createdAtLabel || 'Fecha no disponible'}
+                      {group.requesters.length > 0 && ` · ${group.requesters.join(', ')}`}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRejectRequestGroup(group)}
+                      disabled={busy}
+                      className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50"
+                    >
+                      <X className="h-3.5 w-3.5" /> Rechazar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleApproveRequestGroup(group)}
+                      disabled={busy || !supplier || Boolean(unavailableProduct) || group.items.length > 50 || group.requests.length > 50}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Check className="h-3.5 w-3.5" /> Aprobar y crear OC
+                    </button>
+                  </div>
+                </div>
+                {unavailableProduct && (
+                  <p className="mt-3 text-xs text-rose-300">No se puede aprobar: {unavailableProduct.productName} ya no está habilitado en esta tienda.</p>
+                )}
+                {!supplier && <p className="mt-3 text-xs text-rose-300">Reactiva el proveedor para poder crear la orden.</p>}
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-96 text-left text-xs text-slate-300">
+                    <thead className="border-b border-slate-700 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">Producto</th>
+                        <th className="px-3 py-2">Cantidad solicitada</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/60">
+                      {group.items.map((item) => (
+                        <tr key={item.productId}>
+                          <td className="px-3 py-2 text-slate-100">{item.productName}</td>
+                          <td className="px-3 py-2 font-mono">{item.qtyRequested} {item.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            );
+          })}
+        </div>
       )}
 
       {canManagePurchases && section === 'suppliers' && (
@@ -889,6 +1133,128 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
                 <button type="button" onClick={() => setOrderModalOpen(false)} disabled={busy} className="rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50">Cancelar</button>
                 <button type="submit" disabled={busy} className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50">
                   {busy ? 'Creando...' : 'Crear orden'}
+                </button>
+              </div>
+            </div>
+            {actionError && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">{actionError}</p>}
+          </form>
+        </Modal>
+      )}
+
+      {approvalModal && (
+        <Modal
+          title="Revisar orden de compra"
+          subtitle={`${activeSuppliers.find((supplier) => supplier.id === approvalModal.group.supplierId)?.name || 'Proveedor'} · ${storeNameById.get(approvalModal.group.storeId) || 'Tienda'}`}
+          onClose={() => setApprovalModal(null)}
+          busy={busy}
+          wide
+        >
+          <form onSubmit={handleSubmitApproval} className="space-y-4">
+            <p className="text-xs text-slate-400">
+              Puedes cambiar productos, cantidades y costos antes de aprobar. El inventario aumentará únicamente al registrar la recepción.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-160 text-left text-xs text-slate-300">
+                <thead className="border-b border-slate-700 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  <tr>
+                    <th className="px-2 py-2">Producto</th>
+                    <th className="px-2 py-2">Cantidad</th>
+                    <th className="px-2 py-2">Costo unitario</th>
+                    <th className="px-2 py-2 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700/60">
+                  {approvalModal.lines.map((line, index) => (
+                    <tr key={`${index}-${line.productId}`}>
+                      <td className="px-2 py-2">
+                        <select
+                          required
+                          aria-label={`Producto de la línea ${index + 1}`}
+                          value={line.productId}
+                          onChange={(event) => handleApprovalProductPick(index, event.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">Selecciona producto</option>
+                          {approvalProducts.map((product) => (
+                            <option
+                              key={product.id}
+                              value={product.id}
+                              disabled={approvalModal.lines.some((candidate, otherIndex) => (
+                                otherIndex !== index && candidate.productId === product.id
+                              ))}
+                            >
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-2">
+                        <input
+                          required
+                          aria-label={`Cantidad de ${approvalProducts.find((product) => product.id === line.productId)?.name || 'producto'}`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={line.qty}
+                          onChange={(event) => updateApprovalLine(index, { qty: event.target.value })}
+                          className={`${inputClass} w-28`}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <input
+                          required
+                          aria-label={`Costo unitario de ${approvalProducts.find((product) => product.id === line.productId)?.name || 'producto'}`}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={line.unitCost}
+                          onChange={(event) => updateApprovalLine(index, { unitCost: event.target.value })}
+                          className={`${inputClass} w-28`}
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <button
+                          type="button"
+                          aria-label="Quitar producto de la orden"
+                          title="Quitar producto"
+                          disabled={busy || approvalModal.lines.length === 1}
+                          onClick={() => setApprovalModal((previous) => ({
+                            ...previous,
+                            lines: previous.lines.filter((_, lineIndex) => lineIndex !== index),
+                          }))}
+                          className="p-1 text-slate-400 hover:text-rose-300 disabled:opacity-30"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddApprovalLine}
+              disabled={busy || approvalModal.lines.length >= 50 || approvalProducts.every((product) => (
+                approvalModal.lines.some((line) => line.productId === product.id)
+              ))}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" /> Agregar producto
+            </button>
+            <div className="flex items-center justify-between border-t border-slate-700 pt-3">
+              <p className="text-xs text-slate-400">
+                Total estimado:{' '}
+                <strong className="font-mono text-base text-cyan-400">
+                  {formatCurrency(approvalModal.lines.reduce((sum, line) => sum + (Number(line.qty) || 0) * (Number(line.unitCost) || 0), 0))}
+                </strong>
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setApprovalModal(null)} disabled={busy} className="rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={busy || approvalModal.lines.length === 0} className="flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+                  <Check className="h-4 w-4" /> {busy ? 'Creando...' : 'Aprobar y crear OC'}
                 </button>
               </div>
             </div>

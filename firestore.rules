@@ -66,6 +66,13 @@ rules_version = '2';
 //   Suppliers are managed by admins and supervisors; cashiers may read and receive
 //   orders belonging to their assigned active store.
 //
+// Collection: purchaseRequests  Document ID: auto
+//   storeId, supplierId, requestNumber: string; items: list with one productId,
+//   catalogId, productName, unit, qtyRequested; status: 'pending'|'approved'|'rejected';
+//   requestedBy, createdAt, updatedAt; processedBy?, processedAt?, purchaseOrderId?.
+//   Active staff may create requests only in an accessible active store; cashiers
+//   can only create/read requests for their assigned store. Managers process them.
+//
 // Known limits: stock/price numbers written by the client cannot be fully
 // verified server-side; a malicious cashier of a store could still alter stock or
 // sale totals for that store. Fixing that requires server-side code.
@@ -197,6 +204,14 @@ service cloud.firestore {
 
     function supplierPath(supplierId) {
       return /databases/$(database)/documents/suppliers/$(supplierId);
+    }
+
+    function stockItemPath(stockId) {
+      return /databases/$(database)/documents/stockItems/$(stockId);
+    }
+
+    function purchaseOrderPath(orderId) {
+      return /databases/$(database)/documents/purchaseOrders/$(orderId);
     }
 
     // Cashiers are confined to their assigned store; other active roles see all stores.
@@ -578,6 +593,60 @@ service cloud.firestore {
         && supplier.name == data.supplierName;
     }
 
+    function isNewPurchaseRequest(data) {
+      let item = data.items[0];
+      let stock = get(stockItemPath(item.productId)).data;
+      let catalog = get(catalogPath(item.catalogId)).data;
+      let supplier = get(supplierPath(data.supplierId)).data;
+      return hasOnlyKeys(data, ['requestNumber', 'storeId', 'supplierId', 'items', 'status',
+          'requestedBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['requestNumber', 'storeId', 'supplierId', 'items', 'status',
+          'requestedBy', 'createdAt', 'updatedAt'])
+        && validText(data.requestNumber, 30) && data.requestNumber.size() > 0
+        && validText(data.storeId, 100) && data.storeId.size() > 0
+        && validText(data.supplierId, 100) && data.supplierId.size() > 0
+        && data.status == 'pending'
+        && data.items is list && data.items.size() == 1
+        && item is map
+        && hasOnlyKeys(item, ['productId', 'catalogId', 'productName', 'unit', 'qtyRequested'])
+        && validText(item.productId, 100) && item.productId.size() > 0
+        && validText(item.catalogId, 100) && item.catalogId.size() > 0
+        && validText(item.productName, 120) && item.productName.size() > 0
+        && validText(item.unit, 10) && item.unit.size() > 0
+        && item.qtyRequested is number && item.qtyRequested > 0 && item.qtyRequested < 1000000
+        && stock.storeId == data.storeId
+        && stock.catalogId == item.catalogId
+        && catalog.status == 'active'
+        && catalog.name == item.productName
+        && catalog.supplierId == data.supplierId
+        && supplier.status == 'active'
+        && data.requestedBy is map
+        && data.requestedBy.keys().hasOnly(['userId', 'userName', 'userRole'])
+        && validText(data.requestedBy.get('userName', ''), 100)
+        && data.requestedBy.userRole in ['admin', 'supervisor', 'cajero']
+        && isOwnAuthorship(data.requestedBy)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isPurchaseRequestDecision(oldData, newData) {
+      return isPurchasingStaff()
+        && oldData.status == 'pending'
+        && newData.status in ['approved', 'rejected']
+        && newData.updatedAt == request.time
+        && newData.processedAt == request.time
+        && isOwnAuthorship(newData.processedBy)
+        && ((newData.status == 'approved'
+            && changedKeys().hasOnly(['status', 'updatedAt', 'processedBy', 'processedAt', 'purchaseOrderId'])
+            && newData.purchaseOrderId is string
+            && getAfter(purchaseOrderPath(newData.purchaseOrderId)).data.status == 'pending'
+            && getAfter(purchaseOrderPath(newData.purchaseOrderId)).data.storeId == oldData.storeId
+            && getAfter(purchaseOrderPath(newData.purchaseOrderId)).data.supplierId == oldData.supplierId)
+          || (newData.status == 'rejected'
+            && changedKeys().hasOnly(['status', 'updatedAt', 'processedBy', 'processedAt'])
+            && !('purchaseOrderId' in newData)));
+    }
+
     function isPurchaseOrderReceipt(oldData, newData) {
       return oldData.status in ['pending', 'partial']
         && newData.status in ['partial', 'received']
@@ -778,6 +847,17 @@ service cloud.firestore {
             && (isPurchaseOrderReceipt(resource.data, request.resource.data)
               || isPurchaseOrderCancellation(resource.data, request.resource.data)
               || isPartialPurchaseOrderClosure(resource.data, request.resource.data)));
+      allow delete: if false;
+    }
+
+    match /purchaseRequests/{requestId} {
+      allow read: if (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
+        || isCashierForStore(resource.data.get('storeId', null));
+      allow create: if ((isPurchasingStaff() && canOperateStore(request.resource.data.storeId))
+          || isCashierForStore(request.resource.data.storeId))
+        && isNewPurchaseRequest(request.resource.data);
+      allow update: if canOperateStore(resource.data.get('storeId', null))
+        && isPurchaseRequestDecision(resource.data, request.resource.data);
       allow delete: if false;
     }
   }

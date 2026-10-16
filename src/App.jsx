@@ -12,7 +12,6 @@ import {
   Search, 
   Trash2, 
   CheckCircle, 
-  RefreshCw, 
   Store, 
   Truck, 
   MessageSquare, 
@@ -37,13 +36,12 @@ import {
 import { usePOSData } from './hooks/usePOSData';
 import { useCashShift } from './hooks/useCashShift';
 import {
-  addProduct as saveNewProduct,
   deleteProduct as removeProduct,
-  restockProduct as saveRestock,
   updateProductMinStock as saveMinStock,
   completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
 import { createSale } from './services/salesService';
+import { createPurchaseRequest, subscribeToPurchaseRequests } from './services/purchaseService';
 import { setStorePriceOverride } from './services/catalogService';
 import { transferInventory } from './services/transferService';
 import { closeCashShift, openCashShift } from './services/cashShiftService';
@@ -112,8 +110,9 @@ export default function App() {
   const [storeError, setStoreError] = useState('');
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [pendingPurchaseRequestsCount, setPendingPurchaseRequestsCount] = useState(0);
   const [isSavingSale, setIsSavingSale] = useState(false);
-  const [isRestocking, setIsRestocking] = useState(false);
+  const [isSubmittingPurchaseRequest, setIsSubmittingPurchaseRequest] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState(null);
   const [ticketToPrint, setTicketToPrint] = useState(null);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
@@ -137,10 +136,8 @@ export default function App() {
   // Inventory Modal State
   const [isRestockOpen, setIsRestockOpen] = useState(false);
   const [restockProduct, setRestockProduct] = useState(null);
-  const [restockStoreId, setRestockStoreId] = useState('');
   const [restockAmount, setRestockAmount] = useState('');
   const [restockError, setRestockError] = useState('');
-  const [canCreateMissingRestockProduct, setCanCreateMissingRestockProduct] = useState(false);
   const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
   const [inventoryTargetStoreId, setInventoryTargetStoreId] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
@@ -219,6 +216,10 @@ export default function App() {
   const canAccessCatalog = currentUser?.status === 'active' && isStoreManager;
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const isGeneralView = isStoreManager && !selectedStoreId;
+  const purchaseRequestStoreIds = isStoreManager
+    ? selectedStoreId ? [selectedStoreId] : activeStores.map((store) => store.id)
+    : [];
+  const purchaseRequestStoreIdsKey = purchaseRequestStoreIds.join('|');
   const canUsePos = canAccessPos && !isGeneralView;
   const { shift: cashShift, loading: cashShiftLoading, error: cashShiftError } = useCashShift(
     activeStoreId,
@@ -229,6 +230,17 @@ export default function App() {
   const cashShiftStoreMismatch = cashShift?.status === 'open' && !isCashShiftOpen;
   const [usersLoadedForUserId, setUsersLoadedForUserId] = useState(null);
   const usersLoading = Boolean(canAccessUsers && usersLoadedForUserId !== (currentUserId || 'unknown'));
+
+  useEffect(() => {
+    if (!canAccessPurchases || !isStoreManager || !purchaseRequestStoreIdsKey) return undefined;
+    return subscribeToPurchaseRequests(
+      purchaseRequestStoreIdsKey.split('|'),
+      (requests) => setPendingPurchaseRequestsCount(
+        requests.filter((request) => request.status === 'pending').length,
+      ),
+      (error) => setActionError(`No se pudieron contar las solicitudes de compra: ${error.message}`),
+    );
+  }, [canAccessPurchases, isStoreManager, purchaseRequestStoreIdsKey]);
 
   useEffect(() => {
     if (!currentUser || currentUser.status !== 'active') {
@@ -695,10 +707,8 @@ export default function App() {
 
   const handleOpenRestock = (product) => {
     setRestockProduct(product);
-    setRestockStoreId(isGeneralView ? product.storeId || '' : activeStoreId);
     setRestockAmount('');
     setRestockError('');
-    setCanCreateMissingRestockProduct(false);
     setIsRestockOpen(true);
   };
 
@@ -815,71 +825,41 @@ export default function App() {
     }
   };
 
-  const handleApplyRestock = async (e) => {
-    e.preventDefault();
-    const targetStoreId = isGeneralView ? restockStoreId : activeStoreId;
-    const targetProduct = isGeneralView
-      ? products.find((product) => product.name === restockProduct?.name && product.storeId === targetStoreId)
-      : restockProduct;
-    const amount = parseFloat(restockAmount);
-    if (isNaN(amount) || amount <= 0 || !targetProduct || !targetStoreId || isRestocking) {
-      if (isGeneralView && !targetProduct) {
-        setRestockError('El producto no existe en la tienda seleccionada. ¿Deseas crearlo con los mismos datos?');
-        setCanCreateMissingRestockProduct(true);
-        return;
-      }
-      setRestockError('Indica una cantidad de resurtido y una tienda válidas.');
+  const handleSubmitPurchaseRequest = async (event) => {
+    event.preventDefault();
+    const targetProduct = restockProduct;
+    const targetStoreId = targetProduct?.storeId || activeStoreId;
+    const amount = Number(restockAmount);
+    const catalogProduct = catalog.find((item) => item.id === targetProduct?.catalogId);
+    if (!targetProduct || !targetStoreId || !Number.isFinite(amount) || amount <= 0
+      || Number((amount * 100).toFixed(0)) / 100 !== amount || isSubmittingPurchaseRequest) {
+      setRestockError('Indica una cantidad solicitada válida.');
+      return;
+    }
+    if (!catalogProduct?.supplierId) {
+      setRestockError('Este producto no tiene un proveedor asignado en el catálogo.');
       return;
     }
 
     setRestockError('');
-    setCanCreateMissingRestockProduct(false);
-    setIsRestocking(true);
+    setIsSubmittingPurchaseRequest(true);
     try {
-      await saveRestock(targetProduct.id, amount, currentUser, targetStoreId);
-      setIsRestockOpen(false);
-      setRestockStoreId('');
-      setRestockProduct(null);
-      setRestockAmount('');
-    } catch (error) {
-      setRestockError(error.message || 'No se pudo actualizar el inventario.');
-    } finally {
-      setIsRestocking(false);
-    }
-  };
-
-  const handleCreateMissingRestockProduct = async () => {
-    const amount = parseFloat(restockAmount);
-    const targetStoreId = isGeneralView ? restockStoreId : activeStoreId;
-    if (!restockProduct || !targetStoreId || !Number.isFinite(amount) || amount <= 0 || isRestocking) {
-      setRestockError('Indica una cantidad de resurtido y una tienda válidas.');
-      return;
-    }
-
-    setRestockError('');
-    setIsRestocking(true);
-    try {
-      await saveNewProduct({
-        name: restockProduct.name,
-        category: restockProduct.category,
-        currentStock: amount,
-        minStock: restockProduct.minStock,
-        unit: restockProduct.unit,
-        price: restockProduct.price,
-        cost: restockProduct.cost,
-        color: restockProduct.color,
-      }, currentUser, targetStoreId);
+      await createPurchaseRequest({
+        storeId: targetStoreId,
+        product: targetProduct,
+        supplierId: catalogProduct.supplierId,
+        qtyRequested: amount,
+        user: currentUser,
+      });
       setIsRestockOpen(false);
       setRestockProduct(null);
-      setRestockStoreId('');
       setRestockAmount('');
-      setCanCreateMissingRestockProduct(false);
-      setAddProductSuccess(`Producto "${restockProduct.name}" creado y resurtido en la tienda seleccionada.`);
-      setTimeout(() => setAddProductSuccess(''), 4000);
+      setAddProductSuccess(`Solicitud enviada: ${amount} ${targetProduct.unit} de ${targetProduct.name}. El inventario no cambia hasta recibir la orden.`);
+      setTimeout(() => setAddProductSuccess(''), 5000);
     } catch (error) {
-      setRestockError(error.message || 'No se pudo crear el producto en la tienda seleccionada.');
+      setRestockError(error.message || 'No se pudo enviar la solicitud de compra.');
     } finally {
-      setIsRestocking(false);
+      setIsSubmittingPurchaseRequest(false);
     }
   };
 
@@ -1610,7 +1590,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('purchases')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              aria-label={pendingPurchaseRequestsCount > 0
+                ? `Compras, ${pendingPurchaseRequestsCount} solicitudes pendientes`
+                : 'Compras'}
+              className={`relative flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 visibleTab === 'purchases' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -1618,6 +1601,11 @@ export default function App() {
             >
               <Truck className="w-4 h-4" />
               <span>Compras</span>
+              {isStoreManager && pendingPurchaseRequestsCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 rounded-full border border-slate-900 bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
+                  {pendingPurchaseRequestsCount > 99 ? '99+' : pendingPurchaseRequestsCount}
+                </span>
+              )}
             </button>
           )}
 
@@ -2312,8 +2300,8 @@ export default function App() {
                                   onClick={() => handleOpenRestock(p)}
                                   className="bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
                                 >
-                                  <RefreshCw className="w-3 h-3" />
-                                  Resurtir
+                                  <Truck className="w-3 h-3" />
+                                  Solicitar compra
                                 </button>
                                 {isAdmin && Number(p.currentStock) === 0 && (
                                   <button
@@ -2829,87 +2817,36 @@ export default function App() {
               </div>
             )}
 
-            {/* Modal for Restock Input */}
+            {/* Modal de solicitud de compra */}
             {isRestockOpen && restockProduct && (
               <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                 <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
                   <div className="flex justify-between items-center border-b border-slate-700 pb-3">
                     <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <RefreshCw className="w-5 h-5 text-cyan-400" />
-                      Entrada de Producto (Resurtir)
+                      <Truck className="w-5 h-5 text-cyan-400" />
+                      Solicitar compra
                     </h3>
-                    <button onClick={() => setIsRestockOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
+                    <button type="button" onClick={() => setIsRestockOpen(false)} disabled={isSubmittingPurchaseRequest} className="text-slate-400 hover:text-white disabled:opacity-50">✕</button>
                   </div>
 
                   <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 space-y-1">
                     <p className="text-xs text-slate-400">Producto seleccionado:</p>
                     <p className="font-bold text-sm text-white">{restockProduct.name}</p>
                     <p className="text-xs text-cyan-400">Stock Actual: {restockProduct.currentStock} {restockProduct.unit}</p>
+                    <p className="text-xs text-slate-400">Tienda: {storeNameById.get(restockProduct.storeId) || 'Tienda asignada'}</p>
                   </div>
 
-                  <form onSubmit={handleApplyRestock} className="space-y-4">
-                    {isGeneralView && (
-                      <div>
-                        <label className="text-xs text-slate-300 block mb-1">
-                          Tienda a resurtir: <span className="text-cyan-400">*</span>
-                        </label>
-                        <select
-                          required
-                          value={restockStoreId}
-                          onChange={(event) => {
-                            setRestockStoreId(event.target.value);
-                            setRestockError('');
-                            setCanCreateMissingRestockProduct(false);
-                          }}
-                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                        >
-                          <option value="">Selecciona una tienda</option>
-                          {activeStores.map((store) => (
-                            <option key={store.id} value={store.id}>{store.name}</option>
-                          ))}
-                        </select>
-                        {restockStoreId && (
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Stock en la tienda seleccionada:{' '}
-                            {products.find((product) => product.name === restockProduct.name
-                              && product.storeId === restockStoreId)?.currentStock ?? 'Producto no disponible'}{' '}
-                            {restockProduct.unit}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                  <form onSubmit={handleSubmitPurchaseRequest} className="space-y-4">
                     {restockError && (
                       <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
                         <p>{restockError}</p>
-                        {canCreateMissingRestockProduct && (
-                          <div className="mt-3 flex justify-end gap-2">
-                            <button
-                              type="button"
-                              disabled={isRestocking}
-                              onClick={() => {
-                                setRestockError('');
-                                setCanCreateMissingRestockProduct(false);
-                              }}
-                              className="rounded-lg bg-slate-700 px-3 py-1.5 font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                            >
-                              No
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isRestocking}
-                              onClick={handleCreateMissingRestockProduct}
-                              className="rounded-lg bg-cyan-500 px-3 py-1.5 font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
-                            >
-                              Sí, crear producto
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
                     <div>
-                      <label className="text-xs text-slate-300 block mb-1">Cantidad a agregar ({restockProduct.unit}):</label>
+                      <label className="text-xs text-slate-300 block mb-1">Cantidad solicitada ({restockProduct.unit}):</label>
                       <input
                         type="number"
+                        min="0.01"
                         step="0.01"
                         placeholder="Ej. 50, 100, 200"
                         required
@@ -2918,21 +2855,23 @@ export default function App() {
                         className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-lg font-bold text-cyan-400 focus:outline-none focus:border-cyan-400"
                       />
                     </div>
+                    <p className="text-[11px] text-slate-400">Las solicitudes del mismo proveedor se agruparán para generar una sola orden. El inventario no cambia hasta recibirla.</p>
 
                     <div className="flex justify-end gap-2 pt-2">
                       <button
                         type="button"
                         onClick={() => setIsRestockOpen(false)}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer"
+                        disabled={isSubmittingPurchaseRequest}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold disabled:opacity-50"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
-                        disabled={isRestocking}
+                        disabled={isSubmittingPurchaseRequest}
                         className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
                       >
-                        {isRestocking ? 'Guardando...' : 'Confirmar Entrada'}
+                        {isSubmittingPurchaseRequest ? 'Enviando...' : 'Enviar solicitud'}
                       </button>
                     </div>
                   </form>
