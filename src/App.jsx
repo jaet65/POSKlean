@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
 import PurchasingPanel from './components/PurchasingPanel';
 import CatalogPanel from './components/CatalogPanel';
+import AdminPanel from './components/admin/AdminPanel';
+import { DEFAULT_CHANNELS, subscribeToSalesChannels } from './services/channelService';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
 import { 
@@ -26,7 +28,6 @@ import {
   ShieldCheck,
   LogOut,
   Edit,
-  UserPlus,
   Lock,
   Key,
   User,
@@ -130,8 +131,10 @@ export default function App() {
     row?.scrollIntoView({ block: 'nearest' });
   }, [lastCartTouch]);
   const [cartQuantityDrafts, setCartQuantityDrafts] = useState({});
-  const [selectedChannel, setSelectedChannel] = useState('Mostrador');
+  const [chosenChannel, setSelectedChannel] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showChannelModal, setShowChannelModal] = useState(false);
+  const pendingProductRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [showCheckoutSuccess, setShowCheckoutSuccess] = useState(false);
@@ -210,6 +213,22 @@ export default function App() {
     || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
 
   const isAdmin = currentUser?.role === 'admin';
+  const [storedChannels, setStoredChannels] = useState([]);
+  useEffect(() => {
+    if (!currentUser) {
+      setStoredChannels([]);
+      return undefined;
+    }
+    return subscribeToSalesChannels(setStoredChannels, () => setStoredChannels([]));
+  }, [currentUser?.id, currentUser?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const salesChannelNames = storedChannels.length > 0
+    ? storedChannels.map((channel) => channel.name)
+    : DEFAULT_CHANNELS;
+  // Con un único canal disponible se usa automáticamente; un canal elegido que ya no existe se descarta.
+  const hasSingleChannel = salesChannelNames.length === 1;
+  const selectedChannel = hasSingleChannel
+    ? salesChannelNames[0]
+    : (salesChannelNames.includes(chosenChannel) ? chosenChannel : null);
   const isEditingArchivedStore = stores.some(
     (store) => store.id === editingStoreId && store.status === 'archived',
   );
@@ -564,8 +583,13 @@ export default function App() {
     });
   }, [products, searchTerm, selectedCategory]);
 
-  const handleSelectProductToCart = (product) => {
+  const handleSelectProductToCart = (product, channelOverride = null) => {
     if (isGeneralView) return;
+    if (!channelOverride && !selectedChannel) {
+      pendingProductRef.current = product;
+      setShowChannelModal(true);
+      return;
+    }
     const existingItem = cart.find((item) => item.id === product.id);
     const nextQuantity = Number(((existingItem?.qty || 0) + 1).toFixed(2));
 
@@ -637,7 +661,7 @@ export default function App() {
   const cartVolume = useMemo(() => summarizeVolume(cart), [cart]);
 
   const handleCompleteSale = async (paymentMethod) => {
-    if (isGeneralView || cart.length === 0 || isSavingSale) return;
+    if (isGeneralView || !selectedChannel || cart.length === 0 || isSavingSale) return;
     if (!isCashShiftOpen) {
       setShowPaymentModal(false);
       setCashShiftActionError('Abre un turno de caja antes de registrar ventas.');
@@ -655,6 +679,7 @@ export default function App() {
         storeId: activeStoreId,
       });
       setCart([]);
+      setSelectedChannel(null);
       setCartQuantityDrafts({});
       setShowPaymentModal(false);
       setLastCompletedSale(sale);
@@ -1052,6 +1077,7 @@ export default function App() {
 
   const handleStoreChange = (storeId) => {
     setCart([]);
+    setSelectedChannel(null);
     setCartQuantityDrafts({});
     setCashShiftModal(null);
     setCashShiftActionError('');
@@ -1840,40 +1866,31 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* Channel Selection Buttons */}
-                  <div className="mb-3">
-                    <label className="text-[11px] text-slate-400 uppercase font-semibold mb-1.5 block">Canal de Venta:</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { id: 'Mostrador', icon: Store, color: 'text-emerald-400' },
-                        { id: 'Uber Flash', icon: Truck, color: 'text-amber-400' },
-                        { id: 'WhatsApp', icon: MessageSquare, color: 'text-green-400' }
-                      ].map(ch => {
-                        const Icon = ch.icon;
-                        const isSel = selectedChannel === ch.id;
-                        return (
-                          <button
-                            key={ch.id}
-                            onClick={() => setSelectedChannel(ch.id)}
-                            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-medium border transition ${
-                              isSel 
-                                ? 'bg-slate-700 border-cyan-500 text-white shadow-sm' 
-                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
-                            }`}
-                          >
-                            <Icon className={`w-3.5 h-3.5 ${ch.color}`} />
-                            <span>{ch.id}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  {/* El canal se elige en una ventana antes de agregar productos y queda fijo durante el ticket */}
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <p className="text-[11px] uppercase font-semibold text-slate-400">
+                      Canal de Venta:{' '}
+                      <span className={selectedChannel ? 'text-cyan-300' : 'text-slate-500'}>{selectedChannel || 'Sin elegir'}</span>
+                    </p>
+                    {!hasSingleChannel && (
+                    <button
+                      type="button"
+                      onClick={() => setShowChannelModal(true)}
+                      disabled={isGeneralView || !isCashShiftOpen}
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      {selectedChannel ? 'Cambiar' : 'Elegir'}
+                    </button>
+                    )}
                   </div>
 
                   {/* Cart Items List */}
                   <div ref={cartListRef} className="space-y-2 max-h-52 overflow-y-auto pr-1">
                     {cart.length === 0 ? (
                       <div className="text-center py-8 text-slate-500 text-xs">
-                        El carrito está vacío. Haz clic en los productos para comenzar a cobras.
+                        {selectedChannel
+                          ? 'El carrito está vacío. Haz clic en los productos para comenzar a cobrar.'
+                          : 'Haz clic en un producto y elige el canal de venta para comenzar.'}
                       </div>
                     ) : (
                       cart.map(item => {
@@ -3190,353 +3207,27 @@ export default function App() {
 
         {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
         {visibleTab === 'users' && canAccessUsers && (
-          <div className="space-y-5">
-            <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white">Configuración de impresión</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Selecciona el ancho del papel para los tickets.</p>
-                </div>
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  Ancho del ticket
-                  <select
-                    value={receiptWidth}
-                    onChange={(event) => setReceiptWidth(event.target.value)}
-                    className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200"
-                  >
-                    <option value="58">58 mm</option>
-                    <option value="80">80 mm</option>
-                  </select>
-                </label>
-              </div>
-            </section>
-
-            {userSuccessMessage && (
-              <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span>{userSuccessMessage}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setUserSuccessMessage('')}
-                  className="text-emerald-400 hover:text-white text-sm"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {/* Quick Metrics */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
-                  <Users className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Total de Usuarios</p>
-                  <p className="text-2xl font-bold text-white font-mono">{usersList.length}</p>
-                </div>
-              </div>
-
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Administradores</p>
-                  <p className="text-2xl font-bold text-white font-mono">
-                    {usersList.filter(u => u.role === 'admin' || u.email === SUPER_ADMIN_EMAIL).length}
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className={`p-3 rounded-xl border ${
-                  pendingUsersCount > 0 
-                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 animate-pulse' 
-                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                }`}>
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Pendientes de Aprobación</p>
-                  <p className={`text-2xl font-bold font-mono ${pendingUsersCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {pendingUsersCount}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {isAdmin && (
-              <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-bold text-white flex items-center gap-2">
-                      <Store className="w-5 h-5 text-cyan-400" />
-                      Tiendas
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Administra la información de las tiendas y los cajeros asignados.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenStoreModal()}
-                    className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-cyan-400"
-                  >
-                    Agregar tienda
-                  </button>
-                </div>
-                {storeError && (
-                  <p className="text-xs text-red-300">{storeError}</p>
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {stores.map((store) => (
-                    <div key={store.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-300">
-                            <Store className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
-                            <span className="truncate">{store.name}</span>
-                            {store.status === 'archived' && (
-                              <span className="shrink-0 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">
-                                Archivada
-                              </span>
-                            )}
-                        </span>
-                        {store.address && <p className="mt-1 truncate text-[11px] text-slate-400">{store.address}</p>}
-                        {store.phone && <p className="text-[11px] text-slate-400">{store.phone}</p>}
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          Cajeros: {usersList
-                            .filter((user) => user.role === 'cajero' && user.storeId === store.id)
-                            .map((user) => user.displayName || user.username || user.email)
-                            .join(', ') || 'Sin asignar'}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenStoreModal(store)}
-                          disabled={isSavingStore}
-                          className="rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                        >
-                          Editar
-                        </button>
-                        {store.status !== 'archived' && (
-                          <button
-                            type="button"
-                            onClick={() => handleStoreStatusChange(store, 'archived')}
-                            disabled={isSavingStore}
-                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
-                          >
-                            Archivar
-                          </button>
-                        )}
-                        {store.status === 'archived' && (
-                          <button
-                            type="button"
-                            onClick={() => handleStoreStatusChange(store, 'active')}
-                            disabled={isSavingStore}
-                            className="rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                          >
-                            Reactivar
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Users Table */}
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
-              <div className="p-4 border-b border-slate-700 flex justify-between items-center flex-wrap gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-cyan-400" />
-                    Usuarios y Permisos
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Permite a los administradores conceder o revocar accesos en tiempo real
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleOpenAddUser}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Nuevo Usuario</span>
-                </button>
-              </div>
-
-              {usersLoading && (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  Cargando directorio de usuarios...
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
-                    <tr>
-                      <th className="px-4 py-3">Usuario</th>
-                      <th className="px-4 py-3">Rol</th>
-                      <th className="px-4 py-3">Tienda asignada</th>
-                      <th className="px-4 py-3">Permisos Activos</th>
-                      <th className="px-4 py-3">Estado</th>
-                      <th className="px-4 py-3">Último Acceso</th>
-                      <th className="px-4 py-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/60">
-                    {usersList.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
-                          <Users className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                          <p className="font-semibold text-slate-200 text-sm">No hay usuarios registrados</p>
-                          <p className="text-xs text-slate-400 mt-1">
-                            Agrega colaboradores para asignarles acceso al Punto de Venta o Inventario.
-                          </p>
-                        </td>
-                      </tr>
-                    ) : (
-                      usersList.map(u => {
-                        const isMainAdmin = u.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
-                        const perms = u.permissions || {};
-                        const displayTitle = u.displayName || u.username || u.email || 'Sin nombre';
-                        const subtitle = u.username ? `@${u.username}` : u.email;
-                        return (
-                          <tr key={u.id || u.username || u.email} className="hover:bg-slate-700/30 transition">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                {u.photoURL ? (
-                                  <img src={u.photoURL} alt={displayTitle} className="w-8 h-8 rounded-full border border-slate-600 object-cover" />
-                                ) : (
-                                  <div className="w-8 h-8 rounded-full bg-slate-700 text-cyan-300 flex items-center justify-center font-bold text-xs border border-slate-600">
-                                    {(displayTitle || 'U')[0].toUpperCase()}
-                                  </div>
-                                )}
-                                <div>
-                                  <p className="font-semibold text-slate-100 flex items-center gap-1.5">
-                                    <span>{displayTitle}</span>
-                                    {isMainAdmin && (
-                                      <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-md font-bold">
-                                        Super Admin
-                                      </span>
-                                    )}
-                                    {u.authType === 'credentials' && (
-                                      <span className="text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.2 rounded-md font-medium">
-                                        Usuario / Clave
-                                      </span>
-                                    )}
-                                  </p>
-                                  <p className="text-slate-400 text-[11px] font-mono">{subtitle}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                                u.role === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
-                                u.role === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
-                                u.role === 'cajero' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
-                                'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                              }`}>
-                                {u.role === 'admin' ? 'Administrador' :
-                                 u.role === 'supervisor' ? 'Supervisor' :
-                                 u.role === 'cajero' ? 'Cajero' : 'Personalizado'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-300">
-                              {u.storeId ? (
-                                <span>
-                                  {storeNameById.get(u.storeId) || u.storeId}
-                                  {stores.find((store) => store.id === u.storeId)?.status === 'archived' && (
-                                    <span className="ml-1 text-[10px] text-amber-400">(Archivada)</span>
-                                  )}
-                                </span>
-                              ) : u.role === 'cajero' ? (
-                                <span className="text-slate-500">Sin asignar</span>
-                              ) : (
-                                <span className="text-slate-500">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-wrap gap-1">
-                                {perms.pos && (
-                                  <span className="bg-slate-900 border border-slate-700 text-cyan-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                    POS
-                                  </span>
-                                )}
-                                {perms.inventory && (
-                                  <span className="bg-slate-900 border border-slate-700 text-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                    Inventario
-                                  </span>
-                                )}
-                                {perms.sales && (
-                                  <span className="bg-slate-900 border border-slate-700 text-blue-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                    Ventas
-                                  </span>
-                                )}
-                                {perms.users && (
-                                  <span className="bg-slate-900 border border-slate-700 text-purple-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                                    Usuarios
-                                  </span>
-                                )}
-                                {!perms.pos && !perms.inventory && !perms.sales && !perms.users && (
-                                  <span className="text-slate-500 text-[11px] italic">Sin permisos</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                u.status === 'active' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
-                                u.status === 'pending' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse' :
-                                'bg-red-500/15 text-red-300 border-red-500/30'
-                              }`}>
-                                {u.status === 'active' ? '● Activo' :
-                                 u.status === 'pending' ? '▲ Pendiente' : '✕ Inactivo'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
-                              {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('es-MX', {
-                                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
-                              }) : 'Nunca'}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditUser(u)}
-                                  className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
-                                  title="Editar usuario y permisos"
-                                >
-                                  <Edit className="w-3 h-3" />
-                                  <span>Editar</span>
-                                </button>
-                                {!isMainAdmin && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteUser(u)}
-                                    className="bg-slate-700/60 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40 text-slate-400 p-1.5 rounded-lg transition border border-slate-700 cursor-pointer"
-                                    title="Eliminar usuario"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-          </div>
+          <AdminPanel
+            currentUser={currentUser}
+            isAdmin={isAdmin}
+            receiptWidth={receiptWidth}
+            onReceiptWidthChange={setReceiptWidth}
+            channels={storedChannels}
+            successMessage={userSuccessMessage}
+            onDismissSuccess={() => setUserSuccessMessage('')}
+            usersList={usersList}
+            usersLoading={usersLoading}
+            pendingUsersCount={pendingUsersCount}
+            stores={stores}
+            storeNameById={storeNameById}
+            storeError={storeError}
+            isSavingStore={isSavingStore}
+            onOpenStoreModal={handleOpenStoreModal}
+            onStoreStatusChange={handleStoreStatusChange}
+            onAddUser={handleOpenAddUser}
+            onEditUser={handleOpenEditUser}
+            onDeleteUser={handleDeleteUser}
+          />
         )}
 
       </main>
@@ -3545,6 +3236,57 @@ export default function App() {
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
         POSKlean • Gestión de inventarios y punto de venta integral. • 
       </footer>
+
+      {showChannelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="channel-modal-title"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div>
+                <h2 id="channel-modal-title" className="text-base font-bold text-white">¿Por qué canal es la venta?</h2>
+                <p className="mt-1 text-xs text-slate-400">Puedes cambiarlo mientras armas el ticket.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { pendingProductRef.current = null; setShowChannelModal(false); }}
+                aria-label="Cerrar"
+                className="p-1 text-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {salesChannelNames.map((channelName) => {
+                const Icon = { Mostrador: Store, 'Uber Flash': Truck, WhatsApp: MessageSquare }[channelName] || Store;
+                const color = { Mostrador: 'text-emerald-400', 'Uber Flash': 'text-amber-400', WhatsApp: 'text-green-400' }[channelName] || 'text-cyan-400';
+                return (
+                  <button
+                    key={channelName}
+                    type="button"
+                    onClick={() => {
+                      const pending = pendingProductRef.current;
+                      pendingProductRef.current = null;
+                      setSelectedChannel(channelName);
+                      setShowChannelModal(false);
+                      if (pending) handleSelectProductToCart(pending, channelName);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 ${
+                      selectedChannel === channelName ? 'border-cyan-500' : 'border-slate-700'
+                    }`}
+                  >
+                    <Icon className={`h-6 w-6 ${color}`} />
+                    <span>{channelName}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">

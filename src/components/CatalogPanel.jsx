@@ -370,7 +370,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                     </button>
                   </td>
                   <td className="px-4 py-3">{item.category}</td>
-                  <td className="max-w-[14rem] truncate px-4 py-3 text-slate-400" title={item.description || ''}>{item.description || '—'}</td>
+                  <td className="max-w-56 truncate px-4 py-3 text-slate-400" title={item.description || ''}>{item.description || '—'}</td>
                   <td className="px-4 py-3">
                     {item.supplierId
                       ? supplierNameById.get(item.supplierId) || 'Proveedor archivado'

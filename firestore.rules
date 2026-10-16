@@ -66,6 +66,9 @@ rules_version = '2';
 //   Suppliers are managed by admins and supervisors; cashiers may read and receive
 //   orders belonging to their assigned active store.
 //
+// Collection: salesChannels  Document ID: auto
+//   name: string (max 60); createdBy: string; createdAt, updatedAt: timestamp. Admin-managed.
+//
 // Collection: categories  Document ID: derived from the normalized name
 //   name: string; createdBy: map; createdAt: timestamp.
 //
@@ -784,6 +787,21 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
       allow update: if false;
       allow delete: if isPurchasingStaff();
+    }
+
+    // Sales channels: readable by active staff; managed by admins only.
+    match /salesChannels/{channelId} {
+      allow read: if isActiveStaff();
+      allow create: if isAdmin()
+        && hasOnlyKeys(request.resource.data, ['name', 'createdBy', 'createdAt', 'updatedAt'])
+        && validText(request.resource.data.name, 60) && request.resource.data.name.size() > 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && changedKeys().hasOnly(['name', 'updatedAt'])
+        && validText(request.resource.data.name, 60) && request.resource.data.name.size() > 0
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
     }
 
     // Per-store stock (and optional own price) of a catalog product.
