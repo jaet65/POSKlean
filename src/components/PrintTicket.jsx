@@ -169,9 +169,10 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
             <span>{data.auditedProducts}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Ajustados: </span>
+            <span>Con ajustes: </span>
             <span>{data.adjustedProducts}</span>
           </div>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Faltante: </span>
             <span>{shortageLabel}</span>
@@ -180,13 +181,14 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
             <span>Sobrante: </span>
             <span>{surplusLabel}</span>
           </div>  
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Pérdida: </span>
-            <span>-{formatCurrency(data.lossValue)} MXN</span>
+            <span>A favor: </span>
+            <span>{formatCurrency(data.surplusValue)} MXN</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Valor: </span>
-            <span>{formatCurrency(data.surplusValue)} MXN</span>
+            <span>En contra: </span>
+            <span>-{formatCurrency(data.lossValue)} MXN</span>
           </div>
           <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>

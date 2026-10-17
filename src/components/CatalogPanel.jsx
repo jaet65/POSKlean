@@ -43,6 +43,7 @@ const labelClass = 'mb-1 block text-xs font-medium text-slate-300';
 
 export default function CatalogPanel({ currentUser, catalog, products, stores, activeStoreId }) {
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [showArchived, setShowArchived] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [form, setForm] = useState(null);
@@ -140,6 +141,17 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
       .filter((item) => !term || `${item.name} ${item.category} ${item.description || ''}`.toLocaleLowerCase('es-MX').includes(term))
       .sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }, [catalog, search, showArchived]);
+  const filteredRows = useMemo(() => (
+    selectedCategory === 'Todos'
+      ? rows
+      : rows.filter((item) => item.category === selectedCategory)
+  ), [rows, selectedCategory]);
+
+  useEffect(() => {
+    if (selectedCategory !== 'Todos' && !categories.includes(selectedCategory)) {
+      setSelectedCategory('Todos');
+    }
+  }, [categories, selectedCategory]);
 
   const run = async (action, successMessage) => {
     setBusy(true);
@@ -315,6 +327,23 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
         </label>
       </div>
 
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {['Todos', ...categories].map((category) => (
+          <button
+            key={category}
+            type="button"
+            onClick={() => setSelectedCategory(category)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition ${
+              selectedCategory === category
+                ? 'bg-slate-700 text-cyan-400 border border-cyan-500/30'
+                : 'bg-slate-900 text-slate-400 hover:bg-slate-700/50'
+            }`}
+          >
+            {category}
+          </button>
+        ))}
+      </div>
+
       <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800/60">
         <table className="w-full text-left text-xs text-slate-300">
           <thead className="border-b border-slate-700 bg-slate-900/80 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -330,10 +359,10 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/60">
-            {rows.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">No hay productos en el catálogo.</td></tr>
+            {filteredRows.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">No hay productos que coincidan con los filtros.</td></tr>
             )}
-            {rows.flatMap((item) => {
+            {filteredRows.flatMap((item) => {
               const enabledCount = visibleStores.filter((store) => stockByKey.has(`${store.id}|${item.id}`)).length;
               const expanded = expandedId === item.id;
               const archived = item.status === 'archived';
@@ -563,8 +592,8 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
       )}
 
       {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
-          <form onSubmit={submitProduct} role="dialog" aria-modal="true" aria-label="Producto del catálogo" className="w-full max-w-md space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/80 p-4">
+          <form onSubmit={submitProduct} role="dialog" aria-modal="true" aria-label="Producto del catálogo" className="w-full max-w-md max-h-90vh flex flex-col space-y-1 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl my-auto">
             <div className="flex items-center justify-between border-b border-slate-700 pb-3">
               <h2 className="text-base font-bold text-white">{form.id ? 'Editar producto' : 'Nuevo producto del catálogo'}</h2>
               <button type="button" onClick={() => setForm(null)} aria-label="Cerrar" className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
@@ -610,12 +639,12 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             {!form.id && (
               <div>
                 <label htmlFor="cat-cost" className={labelClass}>Precio de compra por {form.unit} ($ MXN): <span className="text-cyan-400">*</span></label>
-                <input id="cat-cost" required type="number" min="0.01" step="0.01" placeholder="0.00" value={form.cost} onChange={(event) => handleCostChange(event.target.value)} className={`${inputClass} font-mono`} />
+                <input id="cat-cost" required type="number" min="0.00" step="0.50" placeholder="0.00" value={form.cost} onChange={(event) => handleCostChange(event.target.value)} className={`${inputClass} font-mono`} />
               </div>
             )}
             <div>
               <label htmlFor="cat-min" className={labelClass}>Stock mínimo / alerta ({form.unit}): <span className="text-cyan-400">*</span></label>
-              <input id="cat-min" required type="number" min="0" step="0.01" value={form.minStock} onChange={(event) => setForm({ ...form, minStock: event.target.value })} className={`${inputClass} font-mono text-amber-300`} />
+              <input id="cat-min" required type="number" min="0" step="1" value={form.minStock} onChange={(event) => setForm({ ...form, minStock: event.target.value })} className={`${inputClass} font-mono text-amber-300`} />
               <p className="mt-1 text-[10px] text-slate-500">Se avisa cuando el stock llegue a este valor. Es el mínimo sugerido al habilitar el producto en cada tienda.</p>
             </div>
             {!form.id && (
@@ -630,7 +659,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
                 {form.storeId && (
                   <div>
                     <label htmlFor="cat-stock" className={labelClass}>Stock inicial ({form.unit}): <span className="text-cyan-400">*</span></label>
-                    <input id="cat-stock" required type="number" min="0" step="0.01" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} className={`${inputClass} font-mono`} />
+                    <input id="cat-stock" required type="number" min="0" step="1" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} className={`${inputClass} font-mono`} />
                   </div>
                 )}
               </div>
@@ -638,7 +667,7 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
             {form.id ? (
               <div>
                 <label htmlFor="cat-price" className={labelClass}>Precio de venta global por {form.unit} ($ MXN): <span className="text-cyan-400">*</span></label>
-                <input id="cat-price" required type="number" min="0.01" step="0.01" placeholder="0.00" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value, priceAuto: false })} className={`${inputClass} font-mono`} />
+                <input id="cat-price" required type="number" min="0" step="0.5" placeholder="0.00" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value, priceAuto: false })} className={`${inputClass} font-mono`} />
                 <p className="mt-1 text-[11px] text-slate-500">Cada tienda puede tener su propio precio desde la fila del producto.</p>
               </div>
             ) : (
@@ -690,21 +719,21 @@ export default function CatalogPanel({ currentUser, catalog, products, stores, a
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label htmlFor="sf-stock" className={labelClass}>Stock inicial</label>
-                  <input id="sf-stock" type="number" min="0" step="0.01" value={storeForm.stock} onChange={(event) => setStoreForm({ ...storeForm, stock: event.target.value })} className={inputClass} />
+                  <input id="sf-stock" type="number" min="0" step="1" value={storeForm.stock} onChange={(event) => setStoreForm({ ...storeForm, stock: event.target.value })} className={inputClass} />
                 </div>
                 <div>
                   <label htmlFor="sf-min" className={labelClass}>Mínimo</label>
-                  <input id="sf-min" type="number" min="0" step="0.01" value={storeForm.minStock} onChange={(event) => setStoreForm({ ...storeForm, minStock: event.target.value })} className={inputClass} />
+                  <input id="sf-min" type="number" min="0" step="1" value={storeForm.minStock} onChange={(event) => setStoreForm({ ...storeForm, minStock: event.target.value })} className={inputClass} />
                 </div>
                 <div>
                   <label htmlFor="sf-cost" className={labelClass}>Costo ($)</label>
-                  <input id="sf-cost" type="number" min="0" step="0.01" value={storeForm.cost} onChange={(event) => setStoreForm({ ...storeForm, cost: event.target.value })} className={inputClass} />
+                  <input id="sf-cost" type="number" min="0" step="0.50" value={storeForm.cost} onChange={(event) => setStoreForm({ ...storeForm, cost: event.target.value })} className={inputClass} />
                 </div>
               </div>
             )}
             <div>
               <label htmlFor="sf-price" className={labelClass}>Precio propio de esta tienda ($)</label>
-              <input id="sf-price" type="number" min="0.01" step="0.01" value={storeForm.price} onChange={(event) => setStoreForm({ ...storeForm, price: event.target.value })} placeholder="Vacío = precio global" className={inputClass} />
+              <input id="sf-price" type="number" min="0" step="0.50" value={storeForm.price} onChange={(event) => setStoreForm({ ...storeForm, price: event.target.value })} placeholder="Vacío = precio global" className={inputClass} />
               {storeForm.mode === 'enable' && parseFloat(storeForm.cost) > 0 && (
                 <p className="mt-1 text-[11px] text-slate-500">Sugerido por costo: {formatCurrency(suggestedSalePrice(parseFloat(storeForm.cost)))}</p>
               )}

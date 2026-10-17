@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import PrintTicket from './components/PrintTicket';
+import POSCatalog from './components/POSCatalog';
+import POSCartPanel from './components/POSCartPanel';
+import InventoryTable from './components/InventoryTable';
 import PurchasingPanel from './components/PurchasingPanel';
 import CatalogPanel from './components/CatalogPanel';
 import AdminPanel from './components/admin/AdminPanel';
@@ -11,8 +14,6 @@ import {
   Package, 
   TrendingUp, 
   AlertTriangle, 
-  Search, 
-  Trash2, 
   CheckCircle, 
   Store, 
   Truck, 
@@ -27,7 +28,6 @@ import {
   Users,
   ShieldCheck,
   LogOut,
-  Edit,
   Lock,
   Key,
   User,
@@ -78,18 +78,6 @@ const INITIAL_USER_FORM = {
   storeId: '',
 };
 
-// Margen sobre la venta; 50% es el objetivo (precio = costo ÷ 0.5), con ±2 puntos de tolerancia.
-const getPriceLevel = (price, cost) => {
-  const sale = Number(price);
-  const purchase = Number(cost);
-  if (!Number.isFinite(sale) || !Number.isFinite(purchase) || sale <= 0 || purchase <= 0) return null;
-  const margin = ((sale - purchase) / sale) * 100;
-  const detail = `Margen ${margin.toFixed(0)}% sobre la venta (objetivo 50%)`;
-  if (margin < 48) return { label: 'Bajo', title: detail, className: 'bg-rose-500/20 text-rose-300' };
-  if (margin <= 52) return { label: 'Ok', title: detail, className: 'bg-emerald-500/20 text-emerald-300' };
-  return { label: 'Alto', title: detail, className: 'bg-amber-500/20 text-amber-300' };
-};
-
 const getCurrentDayRange = () => {
   const today = new Date();
   return {
@@ -122,14 +110,7 @@ export default function App() {
   
   // POS State
   const [cart, setCart] = useState([]);
-  const cartListRef = useRef(null);
   const [lastCartTouch, setLastCartTouch] = useState({ id: null, n: 0 });
-  // Muestra siempre el producto agregado o incrementado más recientemente.
-  useEffect(() => {
-    if (!lastCartTouch.id) return;
-    const row = [...(cartListRef.current?.children || [])].find((el) => el.dataset.cartId === lastCartTouch.id);
-    row?.scrollIntoView({ block: 'nearest' });
-  }, [lastCartTouch]);
   const [cartQuantityDrafts, setCartQuantityDrafts] = useState({});
   const [chosenChannel, setSelectedChannel] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -1758,230 +1739,44 @@ export default function App() {
         {visibleTab === 'pos' && canUsePos && !(activeStoreId && !isCashShiftOpen) && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
             
-            {/* Catalog & Quick Add (Left Column - 7/12) */}
-            <div className="lg:col-span-7 flex flex-col gap-4">
-              
-              {/* Search & Category Filter */}
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col gap-3">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar jabón, cloro, suavitel..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-                
-                <div className="flex gap-1 overflow-x-auto pb-1">
-                  {['Todos', ...availableCategories].map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition ${
-                        selectedCategory === cat 
-                          ? 'bg-slate-700 text-cyan-400 border border-cyan-500/30' 
-                          : 'bg-slate-900 text-slate-400 hover:bg-slate-700/50'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
+            <POSCatalog
+              availableCategories={availableCategories}
+              cart={cart}
+              filteredProducts={filteredProducts}
+              isCashShiftOpen={isCashShiftOpen}
+              isGeneralView={isGeneralView}
+              onCategoryChange={setSelectedCategory}
+              onProductSelect={handleSelectProductToCart}
+              onSearchChange={setSearchTerm}
+              searchTerm={searchTerm}
+              selectedCategory={selectedCategory}
+            />
 
-              {/* Product Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
-                {filteredProducts.map(prod => {
-                  const isLow = prod.currentStock <= prod.minStock;
-                  const isOutOfStock = Number(prod.currentStock) === 0;
-                  const isSelected = cart.some((item) => item.id === prod.id);
-
-                  return (
-                    <button
-                      key={prod.id}
-                      disabled={isGeneralView || isOutOfStock || !isCashShiftOpen}
-                      onClick={() => handleSelectProductToCart(prod)}
-                      className={`text-left p-2.5 rounded-xl border transition-all flex flex-col justify-between relative group ${
-                        isSelected 
-                          ? 'bg-slate-800 border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg' 
-                          : isOutOfStock
-                            ? 'bg-slate-800/50 border-slate-700/80 opacity-60 cursor-not-allowed'
-                            : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-500 hover:bg-slate-800'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className={`w-2.5 h-2.5 rounded-full ${prod.color}`} />
-                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
-                            isOutOfStock
-                              ? 'bg-red-500/20 border-red-500/30 text-red-300'
-                              : isLow
-                              ? 'bg-amber-500/20 border-amber-500/30 text-amber-300' 
-                              : 'bg-slate-900 border-slate-700 text-slate-300'
-                          }`}>
-                            {prod.currentStock} {prod.unit}
-                          </span>
-                        </div>
-                        <h3 className="font-semibold text-xs text-slate-100 line-clamp-2 leading-snug mb-0.5">
-                          {prod.name}
-                        </h3>
-                        {prod.description && (
-                          <p title={prod.description} className="text-[10px] text-slate-400 line-clamp-2 leading-snug">
-                            {prod.description}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-2 pt-1.5 border-t border-slate-700/60 flex items-center justify-between">
-                        <span className="text-[11px] text-slate-400">x {prod.unit}</span>
-                        <span className="text-sm font-bold text-cyan-400">{formatCurrency(prod.price)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Cart Panel (Right Column - 5/12) */}
-            <div className="lg:col-span-5 flex flex-col gap-4">
-
-              {cashShiftActionError && !cashShiftModal && (
-                <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">
-                  {cashShiftActionError}
-                </p>
-              )}
-
-              {/* Shopping Cart Summary */}
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex-1 flex flex-col justify-between shadow-md">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-700 mb-3">
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <ShoppingCart className="w-5 h-5 text-cyan-400" />
-                      Ticket de Venta
-                    </h3>
-                    <span className="text-xs bg-slate-900 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">
-                      {cart.length} Ítems
-                    </span>
-                  </div>
-
-                  {/* El canal se elige en una ventana antes de agregar productos y queda fijo durante el ticket */}
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <p className="text-[11px] uppercase font-semibold text-slate-400">
-                      Canal de Venta:{' '}
-                      <span className={selectedChannel ? 'text-cyan-300' : 'text-slate-500'}>{selectedChannel || 'Sin elegir'}</span>
-                    </p>
-                    {!hasSingleChannel && (
-                    <button
-                      type="button"
-                      onClick={() => setShowChannelModal(true)}
-                      disabled={isGeneralView || !isCashShiftOpen}
-                      className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      {selectedChannel ? 'Cambiar' : 'Elegir'}
-                    </button>
-                    )}
-                  </div>
-
-                  {/* Cart Items List */}
-                  <div ref={cartListRef} className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                    {cart.length === 0 ? (
-                      <div className="text-center py-8 text-slate-500 text-xs">
-                        {selectedChannel
-                          ? 'El carrito está vacío. Haz clic en los productos para comenzar a cobrar.'
-                          : 'Haz clic en un producto y elige el canal de venta para comenzar.'}
-                      </div>
-                    ) : (
-                      cart.map(item => {
-                        const productStock = products.find((product) => product.id === item.id)?.currentStock;
-                        return (
-                          <div key={item.id} data-cart-id={item.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/60 text-xs">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-slate-200 line-clamp-1">{item.name}</p>
-                              <p className="text-slate-400 text-[11px]">{formatCurrency(item.price)} / {item.unit}</p>
-                            </div>
-                            <input
-                              type="number"
-                              min="0.01"
-                              max={productStock}
-                              step="0.01"
-                              aria-label={`Cantidad de ${item.name}`}
-                              value={cartQuantityDrafts[item.id] ?? item.qty}
-                              onChange={(event) => handleCartQuantityChange(item.id, event.target.value)}
-                              onBlur={() => handleCartQuantityBlur(item.id)}
-                              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-1.5 py-1.5 text-center font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
-                            />
-                            <span className="font-bold text-slate-100 whitespace-nowrap">{formatCurrency(item.total)}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFromCart(item.id)}
-                              aria-label={`Quitar ${item.name}`}
-                              className="text-slate-500 hover:text-red-400 p-1 rounded-md transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Checkout Summary Footer */}
-                <div className="pt-4 border-t border-slate-700 mt-4">
-                <div className="space-y-1.5 mb-4 text-xs">
-                    <div className="flex justify-between text-slate-400">
-                      <span>Total Volumen:</span>
-                      <span className="font-mono text-slate-200">
-                        {[
-                          cartVolume.liters > 0 ? `${cartVolume.liters.toFixed(1)} L` : '',
-                          formatOtherUnits(cartVolume.others),
-                        ].filter(Boolean).join(' · ') || '—'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-base font-bold text-white pt-1 border-t border-slate-700/50">
-                      <span>Total a Cobrar:</span>
-                      <span className="text-xl text-cyan-400 font-mono">{formatCurrency(cartTotal)} MXN</span>
-                    </div>
-                  </div>
-
-                  {showCheckoutSuccess && (
-                    <div className="mb-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-2.5 rounded-xl text-xs flex items-center justify-center gap-2 animate-bounce">
-                      <CheckCircle className="w-4 h-4" />
-                      <span>¡Venta registrada con éxito! {lastCompletedSale && `Total: ${formatCurrency(lastCompletedSale.total)}`}</span>
-                    </div>
-                  )}
-                  {lastCompletedSale && (
-                    <button
-                      type="button"
-                      onClick={() => setTicketToPrint({ type: 'sale', data: lastCompletedSale })}
-                      className="mb-2 w-full py-2 rounded-xl border border-slate-600 text-xs font-semibold text-slate-200 hover:bg-slate-700 flex items-center justify-center gap-2"
-                    >
-                      <Printer className="w-4 h-4" />
-                      Imprimir Ticket
-                    </button>
-                  )}
-
-                  <button
-                    disabled={isGeneralView || cart.length === 0 || isSavingSale || loading || !isCashShiftOpen}
-                    onClick={() => {
-                      setActionError('');
-                      setShowPaymentModal(true);
-                    }}
-                    className={`w-full py-3 rounded-xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${
-                      !isGeneralView && cart.length > 0 && !isSavingSale && !loading && isCashShiftOpen
-                        ? 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-cyan-500/25' 
-                        : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                    }`}
-                  >
-                    <DollarSign className="w-4 h-4" />
-                    {isSavingSale ? 'Procesando...' : `Registrar Cobro (${formatCurrency(cartTotal)})`}
-                  </button>
-                </div>
-              </div>
-
-            </div>
+            <POSCartPanel
+              cart={cart}
+              cartQuantityDrafts={cartQuantityDrafts}
+              cartTotal={cartTotal}
+              cartVolume={cartVolume}
+              cashShiftActionError={cashShiftActionError}
+              cashShiftModal={cashShiftModal}
+              hasSingleChannel={hasSingleChannel}
+              isCashShiftOpen={isCashShiftOpen}
+              isGeneralView={isGeneralView}
+              isSavingSale={isSavingSale}
+              lastCartTouch={lastCartTouch}
+              lastCompletedSale={lastCompletedSale}
+              loading={loading}
+              onCartQuantityBlur={handleCartQuantityBlur}
+              onCartQuantityChange={handleCartQuantityChange}
+              onClearActionError={() => setActionError('')}
+              onOpenChannelModal={() => setShowChannelModal(true)}
+              onOpenPaymentModal={() => setShowPaymentModal(true)}
+              onPrintLastTicket={() => setTicketToPrint({ type: 'sale', data: lastCompletedSale })}
+              onRemoveFromCart={handleRemoveFromCart}
+              products={products}
+              selectedChannel={selectedChannel}
+              showCheckoutSuccess={showCheckoutSuccess}
+            />
 
           </div>
         )}
@@ -2070,298 +1865,43 @@ export default function App() {
               </div>
             </div>
 
-            {/* Inventory Table */}
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
-              <div className="p-4 border-b border-slate-700 flex justify-between items-center flex-wrap gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <Package className="w-5 h-5 text-cyan-400" />
-                    Control de Inventario
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {isStoreManager && activeStores.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={handleOpenTransfer}
-                      className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-cyan-500/30"
-                    >
-                      <ArrowLeftRight className="w-4 h-4" />
-                      <span>Transferir</span>
-                    </button>
-                  )}
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={handleOpenInventoryAudit}
-                      className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-amber-500/30"
-                    >
-                      <ClipboardCheck className="w-4 h-4" />
-                      <span>Auditoría</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setIsInventoryHistoryOpen(true)}
-                    className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-600"
-                  >
-                    <History className="w-4 h-4" />
-                    <span>Historial</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
-                    <tr>
-                      <th className="px-4 py-3">Producto</th>
-                      <th className="px-4 py-3">Categoría</th>
-                      <th className="px-4 py-3">Stock Actual</th>
-                      <th className="px-4 py-3">Mínimo (Alerta)</th>
-                      {!isCajero && <th className="px-4 py-3">Costo / Unidad</th>}
-                      <th className="px-4 py-3">Precio Venta</th>
-                      <th className="px-4 py-3 text-right">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/60">
-                    {products.length === 0 ? (
-                      <tr>
-                        <td colSpan={isCajero ? 6 : 7} className="px-4 py-12 text-center text-slate-400">
-                          <Package className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                          <p className="font-semibold text-slate-200 text-sm">No hay productos registrados en el inventario</p>
-                          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                            {isStoreManager
-                              ? 'Crea los productos en la pestaña Catálogo y habilítalos en esta tienda.'
-                              : 'Pide a un administrador o supervisor que habilite productos en esta tienda desde el Catálogo.'}
-                          </p>
-                          {isStoreManager && (
-                            <button
-                              type="button"
-                              onClick={() => setActiveTab('catalog')}
-                              className="mt-4 inline-flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-cyan-500/20 cursor-pointer"
-                            >
-                              <Layers className="w-4 h-4" />
-                              <span>Ir al Catálogo</span>
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ) : (
-                      inventoryTableProducts.map((p, index) => {
-                        const previousProduct = inventoryTableProducts[index - 1];
-                        const storeName = storeNameById.get(p.storeId) || 'Sin tienda';
-                        const startsStoreGroup = isGeneralView
-                          && (!previousProduct || previousProduct.storeId !== p.storeId);
-                        const isOutOfStock = Number(p.currentStock) === 0;
-                        const isLow = p.currentStock <= p.minStock;
-                        const stockScaleMax = Math.max(p.currentStock, p.minStock, 1);
-                        const stockFillPercent = Math.min((p.currentStock / stockScaleMax) * 100, 100);
-                        const stockBarColor = isLow
-                          ? 'bg-red-400'
-                          : p.currentStock <= p.minStock * 1.5
-                            ? 'bg-amber-400'
-                            : 'bg-emerald-400';
-                        return (
-                          <React.Fragment key={p.id}>
-                            {startsStoreGroup && (
-                              <tr className="bg-cyan-500/10 border-y border-cyan-500/20">
-                                <td colSpan={isCajero ? 6 : 7} className="px-4 py-2 text-xs font-bold text-cyan-300">
-                                  <Store className="inline-block w-4 h-4 mr-1.5 -mt-0.5" />
-                                  {storeName}
-                                </td>
-                              </tr>
-                            )}
-                          <tr className="hover:bg-slate-700/30 transition">
-                            <td className="px-4 py-3 font-semibold text-slate-100 flex items-center gap-2">
-                              <span className={`w-2.5 h-2.5 rounded-full ${p.color}`} />
-                              {p.name}
-                            </td>
-                            <td className="px-4 py-3 text-slate-400">{p.category}</td>
-                            <td className="px-4 py-3 font-mono font-bold">
-                              <div className="flex flex-col items-start gap-1.5">
-                                <span className={`px-2 py-0.5 rounded-md border ${
-                                  isOutOfStock
-                                    ? 'bg-red-500/20 text-red-300 border-red-500/40'
-                                    : isLow
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse' 
-                                    : 'bg-slate-900 text-slate-200 border-slate-700'
-                                }`}>
-                                  {p.currentStock} {p.unit}
-                                </span>
-                                <div
-                                  role="meter"
-                                  aria-label={`Nivel de stock de ${p.name}`}
-                                  aria-valuemin={0}
-                                  aria-valuemax={stockScaleMax}
-                                  aria-valuenow={Math.min(p.currentStock, stockScaleMax)}
-                                  aria-valuetext={`${p.currentStock} ${p.unit}; mínimo ${p.minStock} ${p.unit}`}
-                                  title={`Stock: ${p.currentStock} ${p.unit} · Mínimo: ${p.minStock} ${p.unit}`}
-                                  className="relative h-1.5 w-20 rounded-full bg-slate-700"
-                                >
-                                  <div
-                                    className={`h-full rounded-full ${stockBarColor}`}
-                                    style={{ width: `${stockFillPercent}%` }}
-                                  />
-                                  {p.minStock > 0 && (
-                                    <span
-                                      aria-hidden="true"
-                                      className="pointer-events-none absolute inset-y-0 w-0.5 bg-white/90"
-                                      style={{ left: `${(p.minStock / stockScaleMax) * 100}%` }}
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-mono text-slate-400">
-                              {isAdmin && editingMinStockProductId === p.id ? (
-                                <form
-                                  onSubmit={(event) => handleSaveMinStock(event, p.id)}
-                                  className="flex items-center gap-1.5"
-                                >
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    aria-label={`Mínimo de alerta para ${p.name}`}
-                                    value={minStockDraft}
-                                    onChange={(event) => setMinStockDraft(event.target.value)}
-                                    className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-amber-300 focus:outline-none focus:border-cyan-400"
-                                  />
-                                  <span>{p.unit}</span>
-                                  <button
-                                    type="submit"
-                                    disabled={isSavingMinStock}
-                                    aria-label="Guardar mínimo de alerta"
-                                    className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isSavingMinStock}
-                                    onClick={() => setEditingMinStockProductId(null)}
-                                    aria-label="Cancelar edición del mínimo"
-                                    className="text-slate-400 hover:text-white disabled:opacity-50"
-                                  >
-                                    ✕
-                                  </button>
-                                </form>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span>{p.minStock} {p.unit}</span>
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingMinStockProductId(p.id);
-                                        setMinStockDraft(String(p.minStock));
-                                      }}
-                                      aria-label={`Editar mínimo de alerta para ${p.name}`}
-                                      className="text-slate-500 hover:text-cyan-300"
-                                    >
-                                      <Edit className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            {!isCajero && <td className="px-4 py-3 font-mono">{formatCurrency(p.cost)}</td>}
-                            <td className="px-4 py-3 font-mono text-cyan-400 font-bold">
-                              {isStoreManager && editingPriceProductId === p.id ? (
-                                <form onSubmit={(event) => handleSavePrice(event, p)} className="flex items-center gap-1.5">
-                                  <input
-                                    type="number"
-                                    min="0.01"
-                                    step="0.01"
-                                    aria-label={`Precio de venta de ${p.name}`}
-                                    value={priceDraft}
-                                    onChange={(event) => setPriceDraft(event.target.value)}
-                                    className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-cyan-300 focus:outline-none focus:border-cyan-400"
-                                  />
-                                  <button
-                                    type="submit"
-                                    disabled={isSavingPrice}
-                                    aria-label="Guardar precio de venta"
-                                    className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isSavingPrice}
-                                    onClick={() => setEditingPriceProductId(null)}
-                                    aria-label="Cancelar edición del precio"
-                                    className="text-slate-400 hover:text-white disabled:opacity-50"
-                                  >
-                                    ✕
-                                  </button>
-                                </form>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span>{formatCurrency(p.price)}</span>
-                                  {(() => {
-                                    const level = getPriceLevel(p.price, p.cost);
-                                    if (!level) return null;
-                                    return (
-                                      <span
-                                        title={level.title}
-                                        aria-label={level.title}
-                                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${level.className}`}
-                                      >
-                                        {level.label}
-                                      </span>
-                                    );
-                                  })()}
-                                  {isStoreManager && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingPriceProductId(p.id);
-                                        setPriceDraft(String(p.price));
-                                      }}
-                                      aria-label={`Editar precio de venta de ${p.name}`}
-                                      className="text-slate-500 hover:text-cyan-300"
-                                    >
-                                      <Edit className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => handleOpenRestock(p)}
-                                  className="bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 border border-slate-600 cursor-pointer"
-                                >
-                                  <Truck className="w-3 h-3" />
-                                  Solicitar compra
-                                </button>
-                                {isAdmin && Number(p.currentStock) === 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteProduct(p)}
-                                    disabled={deletingProductId === p.id}
-                                    aria-label={`Eliminar ${p.name}`}
-                                    title="Eliminar producto sin existencias"
-                                    className="text-slate-400 hover:text-red-400 disabled:opacity-50 p-1.5 rounded-lg hover:bg-red-500/10 transition"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                          </React.Fragment>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <InventoryTable
+              activeStoreCount={activeStores.length}
+              deletingProductId={deletingProductId}
+              editingMinStockProductId={editingMinStockProductId}
+              editingPriceProductId={editingPriceProductId}
+              inventoryTableProducts={inventoryTableProducts}
+              isAdmin={isAdmin}
+              isCajero={isCajero}
+              isGeneralView={isGeneralView}
+              isSavingMinStock={isSavingMinStock}
+              isSavingPrice={isSavingPrice}
+              isStoreManager={isStoreManager}
+              minStockDraft={minStockDraft}
+              onCancelMinStock={() => setEditingMinStockProductId(null)}
+              onCancelPrice={() => setEditingPriceProductId(null)}
+              onDeleteProduct={handleDeleteProduct}
+              onEditMinStock={(product) => {
+                setEditingMinStockProductId(product.id);
+                setMinStockDraft(String(product.minStock));
+              }}
+              onEditPrice={(product) => {
+                setEditingPriceProductId(product.id);
+                setPriceDraft(String(product.price));
+              }}
+              onGoToCatalog={() => setActiveTab('catalog')}
+              onMinStockDraftChange={setMinStockDraft}
+              onOpenHistory={() => setIsInventoryHistoryOpen(true)}
+              onOpenInventoryAudit={handleOpenInventoryAudit}
+              onOpenRestock={handleOpenRestock}
+              onOpenTransfer={handleOpenTransfer}
+              onPriceDraftChange={setPriceDraft}
+              onSaveMinStock={handleSaveMinStock}
+              onSavePrice={handleSavePrice}
+              priceDraft={priceDraft}
+              products={products}
+              storeNameById={storeNameById}
+            />
 
             {isInventoryHistoryOpen && (
               <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -2666,7 +2206,7 @@ export default function App() {
                               <th className="px-3 py-3">Stock esperado</th>
                               <th className="px-3 py-3">Conteo físico</th>
                               <th className="px-3 py-3">Diferencia</th>
-                              <th className="px-3 py-3">Valor a precio de venta</th>
+                              <th className="px-3 py-3">Valor (precio de venta)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-700/60">
@@ -2678,7 +2218,7 @@ export default function App() {
                                 <td className={`px-3 py-2.5 font-mono font-semibold ${line.difference < 0 ? 'text-rose-300' : line.difference > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
                                   {line.difference > 0 ? '+' : ''}{line.difference.toFixed(2)} {line.unit}
                                 </td>
-                                <td className="px-3 py-2.5 font-mono text-rose-300">
+                                <td className={`px-3 py-2.5 font-mono ${line.shortage > 0 ? 'text-rose-300' : line.surplus > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
                                   {line.shortage > 0
                                     ? `-${formatCurrency(line.lossValue)}`
                                     : line.surplus > 0
