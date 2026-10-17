@@ -1434,8 +1434,8 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       
       {/* Top Navbar */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
-        <div className="flex items-center space-x-3">
+      <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 px-3 py-3 shadow-md sm:px-4 lg:gap-4 xl:px-6">
+        <div className="flex shrink-0 items-center space-x-3">
           <div className="bg-linear-to-r from-cyan-500 to-blue-600 p-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
             <Droplet className="w-6 h-6 text-white" />
           </div>
@@ -1449,7 +1449,7 @@ export default function App() {
         </div>
 
         {/* Global Quick Metrics & User Info */}
-        <div className="flex items-center gap-3 ml-4 mr-auto">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 lg:justify-end lg:gap-3">
           <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${
             lowStockCount > 0 
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse' 
@@ -1567,7 +1567,7 @@ export default function App() {
           )}
 
           {/* User Profile Badge */}
-          <div className="absolute top-3 right-4 z-10 flex h-11 items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl">
+          <div className="ml-auto flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 lg:ml-0">
             {currentUser.photoURL ? (
               <img
                 src={currentUser.photoURL}
@@ -1603,19 +1603,21 @@ export default function App() {
         </div>
 
         {/* View Switcher Tabs */}
-        <nav className="flex w-full bg-slate-900 p-1 rounded-xl border border-slate-700/80">
+        <nav aria-label="Secciones principales" className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900 p-1">
           {canUsePos && (
             <button
               type="button"
               onClick={() => setActiveTab('pos')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              aria-label="Punto de Venta"
+              title="Punto de Venta"
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'pos' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <ShoppingCart className="w-4 h-4" />
-              <span>Punto de Venta</span>
+              <span className="hidden lg:inline">Punto de Venta</span>
             </button>
           )}
           
@@ -1623,14 +1625,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('inventory')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+              aria-label="Inventario"
+              title="Inventario"
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'inventory' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Package className="w-4 h-4" />
-              <span>Inventario</span>
+              <span className="hidden lg:inline">Inventario</span>
               {lowStockCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900">
                   {lowStockCount}
@@ -1646,14 +1650,15 @@ export default function App() {
               aria-label={pendingPurchaseRequestsCount > 0
                 ? `Compras, ${pendingPurchaseRequestsCount} solicitudes pendientes`
                 : 'Compras'}
-              className={`relative flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              title="Compras"
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'purchases' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Truck className="w-4 h-4" />
-              <span>Compras</span>
+              <span className="hidden lg:inline">Compras</span>
               {isStoreManager && pendingPurchaseRequestsCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-5 rounded-full border border-slate-900 bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
                   {pendingPurchaseRequestsCount > 99 ? '99+' : pendingPurchaseRequestsCount}
@@ -1666,14 +1671,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('catalog')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              aria-label="Catálogo"
+              title="Catálogo"
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'catalog'
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>Catálogo</span>
+              <span className="hidden lg:inline">Catálogo</span>
             </button>
           )}
 
@@ -1681,14 +1688,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('sales')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              aria-label="Ventas y Reportes"
+              title="Ventas y Reportes"
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'sales' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <TrendingUp className="w-4 h-4" />
-              <span>Ventas / Reporte</span>
+              <span className="hidden lg:inline">Ventas / Reporte</span>
             </button>
           )}
 
@@ -1696,14 +1705,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActiveTab('users')}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+              aria-label="Administración"
+              title="Administración"
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                 visibleTab === 'users' 
                   ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Users className="w-4 h-4" />
-              <span>Administración</span>
+              <span className="hidden lg:inline">Administración</span>
               {pendingUsersCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
                   {pendingUsersCount}
@@ -1716,19 +1727,19 @@ export default function App() {
 
       {/* Main Content Area */}
       { (dataError || actionError) && (
-        <div role="alert" className="mx-auto mt-3 w-full max-w-7xl px-3 sm:px-5">
+        <div role="alert" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5">
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {dataError || actionError}
           </div>
         </div>
       )}
       {loading && (
-        <div role="status" className="mx-auto mt-3 w-full max-w-7xl px-3 sm:px-5 text-sm text-slate-400">
+        <div role="status" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5 text-sm text-slate-400">
           Conectando con Firestore...
         </div>
       )}
 
-      <main className="flex-1 p-3 sm:p-5 max-w-7xl mx-auto w-full">
+      <main className="mx-auto w-full max-w-screen-2xl flex-1 p-3 sm:p-5 xl:p-6">
         {/* TAB 1: PUNTO DE VENTA (POS) */}
         {visibleTab === 'pos' && canUsePos && activeStoreId && !isCashShiftOpen && (
           <section className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-8 text-center shadow-md">
