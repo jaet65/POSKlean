@@ -5,6 +5,7 @@ import {
   onSnapshot,
   query,
   runTransaction,
+  updateDoc,
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -124,7 +125,7 @@ const saveStoreDetails = async ({ storeId = null, previousCashierIds = [], ...de
       ...store,
       ...(storeId
         ? { updatedAt: now }
-        : { status: 'active', createdAt: now, openCashShiftCount: 0 }),
+        : { status: 'active', createdAt: now, openCashShiftCount: 0, receiptWidth: 58 }),
     };
     if (storeId) {
       transaction.update(storeRef, storeData);
@@ -145,6 +146,22 @@ export async function updateStore(storeId, details) {
     throw new Error('Selecciona una tienda válida.');
   }
   return saveStoreDetails({ ...details, storeId });
+}
+
+export async function updateStoreReceiptWidth(storeId, receiptWidth) {
+  if (!db) throw new Error('Firestore no está inicializado.');
+  if (typeof storeId !== 'string' || !storeId.trim()) {
+    throw new Error('Selecciona una tienda válida.');
+  }
+  if (typeof receiptWidth !== 'number' || !Number.isFinite(receiptWidth)
+    || receiptWidth < 30 || receiptWidth > 120) {
+    throw new Error('El ancho del ticket debe estar entre 30 y 120 mm.');
+  }
+
+  await updateDoc(doc(db, 'stores', storeId), {
+    receiptWidth,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export async function updateStoreStatus(storeId, status) {

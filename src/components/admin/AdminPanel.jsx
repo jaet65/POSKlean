@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle, ShieldCheck, Users } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/userService';
 import ChannelsPanel from '../ChannelsPanel';
@@ -22,6 +23,10 @@ export default function AdminPanel({
   currentUser,
   isAdmin,
   receiptWidth,
+  receiptWidthStoreId,
+  receiptWidthStoreName,
+  canEditReceiptWidth,
+  isSavingReceiptWidth,
   onReceiptWidthChange,
   channels,
   successMessage,
@@ -39,8 +44,40 @@ export default function AdminPanel({
   onEditUser,
   onDeleteUser,
 }) {
+  const [receiptWidthDraft, setReceiptWidthDraft] = useState(receiptWidth);
   const canManageChannels = isAdmin || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
   const adminCount = usersList.filter((user) => user.role === 'admin' || user.email === SUPER_ADMIN_EMAIL).length;
+
+  useEffect(() => setReceiptWidthDraft(receiptWidth), [receiptWidth, receiptWidthStoreId]);
+
+  const updateReceiptWidthDraft = (value) => {
+    setReceiptWidthDraft(value);
+  };
+
+  const commitReceiptWidthDraft = () => {
+    const width = Number(receiptWidthDraft);
+    if (!Number.isFinite(width) || width < 30 || width > 120) {
+      setReceiptWidthDraft(receiptWidth);
+    }
+  };
+
+  const selectReceiptWidth = (width) => {
+    const nextWidth = String(width);
+    setReceiptWidthDraft(nextWidth);
+    onReceiptWidthChange(nextWidth).then((saved) => {
+      if (!saved) setReceiptWidthDraft(receiptWidth);
+    });
+  };
+
+  const saveReceiptWidthDraft = async () => {
+    const width = Number(receiptWidthDraft);
+    if (!Number.isFinite(width) || width < 30 || width > 120) {
+      setReceiptWidthDraft(receiptWidth);
+      return;
+    }
+    const saved = await onReceiptWidthChange(String(width));
+    if (!saved) setReceiptWidthDraft(receiptWidth);
+  };
 
   return (
     <div className="space-y-5">
@@ -72,19 +109,58 @@ export default function AdminPanel({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-white">Configuración de impresión</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Selecciona el ancho del papel para los tickets.</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {receiptWidthStoreName
+                ? `Configuración para ${receiptWidthStoreName}.`
+                : 'Selecciona una tienda para configurar su ancho de ticket.'}
+            </p>
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-400">
-            Ancho del ticket
-            <select
-              value={receiptWidth}
-              onChange={(event) => onReceiptWidthChange(event.target.value)}
-              className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200"
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="receipt-width" className="text-xs text-slate-400">Ancho del ticket</label>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-900 p-1">
+              <input
+                id="receipt-width"
+                type="number"
+                min="30"
+                max="120"
+                step="0.5"
+                value={receiptWidthDraft}
+                onChange={(event) => updateReceiptWidthDraft(event.target.value)}
+                onBlur={commitReceiptWidthDraft}
+                disabled={!canEditReceiptWidth || isSavingReceiptWidth}
+                aria-label="Ancho del ticket en milímetros"
+                className="w-20 bg-transparent px-1 py-1 text-right text-sm text-slate-200 focus:outline-none"
+              />
+              <span className="pr-1 text-xs text-slate-400">mm</span>
+            </div>
+            <button
+              type="button"
+              onClick={saveReceiptWidthDraft}
+              disabled={!canEditReceiptWidth || isSavingReceiptWidth
+                || !Number.isFinite(Number(receiptWidthDraft))
+                || Number(receiptWidthDraft) < 30 || Number(receiptWidthDraft) > 120
+                || Number(receiptWidthDraft) === Number(receiptWidth)}
+              className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="58">58 mm</option>
-              <option value="80">80 mm</option>
-            </select>
-          </label>
+              {isSavingReceiptWidth ? 'Guardando...' : 'Guardar'}
+            </button>
+            {[58, 80].map((width) => (
+              <button
+                key={width}
+                type="button"
+                onClick={() => selectReceiptWidth(width)}
+                disabled={!canEditReceiptWidth || isSavingReceiptWidth}
+                aria-pressed={Number(receiptWidth) === width}
+                className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  Number(receiptWidth) === width
+                    ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
+                    : 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                {width} mm
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 

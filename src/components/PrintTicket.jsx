@@ -19,7 +19,8 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
 
   return (
     <section
-      className={`print-ticket receipt-${receiptWidth}`}
+      className="print-ticket"
+      style={{ '--receipt-width': `${receiptWidth}mm` }}
       aria-label={`Ticket de ${type === 'sale' ? 'venta' : type === 'audit' ? 'auditoría' : type === 'purchaseOrder' ? 'orden de compra' : 'cierre'} para imprimir`}
     >
       <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>

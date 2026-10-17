@@ -42,17 +42,10 @@ body {
     position: absolute;
     top: 0;
     left: 0;
+    width: calc(var(--receipt-width, 58mm) - 4mm);
     color: #000;
     background: #fff;
     font: 10pt/1.35 Arial, sans-serif;
-  }
-
-  .receipt-58 {
-    width: 54mm;
-  }
-
-  .receipt-80 {
-    width: 76mm;
   }
 
   .print-ticket h1 {

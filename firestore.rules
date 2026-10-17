@@ -403,6 +403,10 @@ service cloud.firestore {
         && data.get('status', 'active') in ['active', 'archived']
         && data.get('cashierIds', []) is list
         && data.get('cashierIds', []).size() <= 200
+        && (!('receiptWidth' in data)
+          || (data.receiptWidth is number
+            && data.receiptWidth >= 30
+            && data.receiptWidth <= 120))
         && data.get('openCashShiftCount', 0) is int
         && data.get('openCashShiftCount', 0) >= 0
         && data.get('openCashShiftCount', 0) <= 100000

@@ -62,6 +62,7 @@ import {
 import {
   addStore as saveStore,
   subscribeToStores,
+  updateStoreReceiptWidth as saveStoreReceiptWidth,
   updateStore as saveStoreUpdate,
   updateStoreStatus as saveStoreStatus,
 } from './services/storeService';
@@ -87,6 +88,9 @@ const getCurrentDayRange = () => {
 };
 
 const INITIAL_DAY_RANGE = getCurrentDayRange();
+const MIN_RECEIPT_WIDTH_MM = 30;
+const MAX_RECEIPT_WIDTH_MM = 120;
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [stores, setStores] = useState([]);
@@ -105,7 +109,7 @@ export default function App() {
   const [deletingProductId, setDeletingProductId] = useState(null);
   const [ticketToPrint, setTicketToPrint] = useState(null);
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
-  const [receiptWidth, setReceiptWidth] = useState('58');
+  const [isSavingReceiptWidth, setIsSavingReceiptWidth] = useState(false);
   const [dayRange, setDayRange] = useState(INITIAL_DAY_RANGE);
   
   // POS State
@@ -223,6 +227,13 @@ export default function App() {
     && (isStoreManager || (isCashier && Boolean(currentUser?.storeId)));
   const canAccessCatalog = currentUser?.status === 'active' && isStoreManager;
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
+  const activeStore = stores.find((store) => store.id === activeStoreId) || null;
+  const storedReceiptWidth = Number(activeStore?.receiptWidth);
+  const receiptWidth = Number.isFinite(storedReceiptWidth)
+    && storedReceiptWidth >= MIN_RECEIPT_WIDTH_MM
+    && storedReceiptWidth <= MAX_RECEIPT_WIDTH_MM
+    ? String(storedReceiptWidth)
+    : '58';
   const isGeneralView = isStoreManager && !selectedStoreId;
   const purchaseRequestStoreIds = isStoreManager
     ? selectedStoreId ? [selectedStoreId] : activeStores.map((store) => store.id)
@@ -902,6 +913,27 @@ export default function App() {
       setActionError(error.message || 'No se pudo actualizar el precio de venta.');
     } finally {
       setIsSavingPrice(false);
+    }
+  };
+
+  const handleSaveReceiptWidth = async (value) => {
+    if (!isAdmin || !activeStoreId || isSavingReceiptWidth) return false;
+    const width = Number(value);
+    if (!Number.isFinite(width) || width < MIN_RECEIPT_WIDTH_MM || width > MAX_RECEIPT_WIDTH_MM) {
+      setActionError('El ancho del ticket debe estar entre 30 y 120 mm.');
+      return false;
+    }
+
+    setActionError('');
+    setIsSavingReceiptWidth(true);
+    try {
+      await saveStoreReceiptWidth(activeStoreId, width);
+      return true;
+    } catch (error) {
+      setActionError(error.message || 'No se pudo guardar el ancho del ticket.');
+      return false;
+    } finally {
+      setIsSavingReceiptWidth(false);
     }
   };
 
@@ -2751,7 +2783,11 @@ export default function App() {
             currentUser={currentUser}
             isAdmin={isAdmin}
             receiptWidth={receiptWidth}
-            onReceiptWidthChange={setReceiptWidth}
+            receiptWidthStoreId={activeStoreId || ''}
+            receiptWidthStoreName={activeStore?.name || ''}
+            canEditReceiptWidth={Boolean(isAdmin && activeStoreId)}
+            isSavingReceiptWidth={isSavingReceiptWidth}
+            onReceiptWidthChange={handleSaveReceiptWidth}
             channels={storedChannels}
             successMessage={userSuccessMessage}
             onDismissSuccess={() => setUserSuccessMessage('')}
