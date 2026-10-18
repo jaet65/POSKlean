@@ -89,6 +89,8 @@ jobs:
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_IS_RELEASE: 'true'
+          APP_VERSION: ${{ needs.get-version.outputs.version }}
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
@@ -141,9 +143,14 @@ jobs:
 
       - name: Build web assets
         run: npm run build
+        env:
+          VITE_IS_RELEASE: 'true'
+          APP_VERSION: ${{ needs.get-version.outputs.version }}
 
       - name: Sync Capacitor Android
-        run: npx cap sync android
+        run: |
+          node -e "const fs = require('fs'); const cfg = JSON.parse(fs.readFileSync('capacitor.config.json', 'utf8')); delete cfg.server; fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg, null, 2));"
+          npx cap sync android
 
       - name: Build Android APK (Debug)
         run: |
@@ -201,6 +208,9 @@ jobs:
 
       - name: Build web app
         run: npm run build
+        env:
+          VITE_IS_RELEASE: 'true'
+          APP_VERSION: ${{ needs.get-version.outputs.version }}
 
       - name: Deploy to Firebase Hosting (Live)
         uses: FirebaseExtended/action-hosting-deploy@v0

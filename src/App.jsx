@@ -1600,9 +1600,21 @@ export default function App() {
           <div>
             <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
               POS<span className="text-cyan-400">Klean</span>
-              <span className="text-xs bg-slate-700 text-cyan-300 font-mono px-2 py-0.5 rounded-full border border-slate-600">
-                v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.2'}
-              </span>
+              {(() => {
+                const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.1';
+                const isDev = typeof __IS_DEV__ !== 'undefined' ? __IS_DEV__ : import.meta.env.DEV;
+                return (
+                  <span
+                    className={`text-xs font-mono px-2 py-0.5 rounded-full border ${
+                      isDev
+                        ? 'bg-amber-950/60 text-amber-300 border-amber-600/50'
+                        : 'bg-slate-700 text-cyan-300 border-slate-600'
+                    }`}
+                  >
+                    {isDev ? `DEV:v${version}` : `v${version}`}
+                  </span>
+                );
+              })()}
             </h1>
           </div>
         </div>
