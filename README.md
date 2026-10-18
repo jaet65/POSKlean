@@ -2,7 +2,7 @@
 
 **POSKlean** es un sistema de Punto de Venta (POS) y gestión de inventario ligero, moderno y eficiente, diseñado para negocios de comercialización de productos e insumos de limpieza y venta al detalle.
 
-La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, aplicación de escritorio nativa mediante **Electron** (optimizada para cajas con impresión silenciosa de tickets) y aplicación móvil a través de **Capacitor** (Android / iOS).
+La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, aplicación de escritorio nativa mediante **Electron** (optimizada para cajas con impresión silenciosa de tickets) y aplicación móvil a través de **Capacitor** (Android / iOS) con autenticación e impresión nativas.
 
 ---
 
@@ -16,7 +16,8 @@ La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, a
 
 * **🖨️ Impresión de Tickets Térmicos:**
   * **Modo Web / PWA:** Diálogo de impresión estándar del navegador (`window.print()`).
-  * **Modo Escritorio (Electron):** Soporte para **impresión silenciosa directa** a impresoras térmicas de tickets sin abrir ventanas de confirmación, agilizando la operación de caja.
+  * **Modo Escritorio (Electron):** Impresión silenciosa directa a impresoras térmicas sin diálogos emergentes (`print-silent`).
+  * **Modo Móvil (Android/Capacitor):** Impresión nativa de recibos térmicos mediante el servicio de impresión de Android (`@capgo/capacitor-printer`).
 
 * **💰 Control de Caja y Turnos (`useCashShift`):**
   * Apertura, arqueo y corte de turnos de caja.
@@ -29,14 +30,15 @@ La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, a
   * Semáforo de stock (saludable, mínimo, crítico) y cálculo de valor de compra/venta.
 
 * **👥 Gestión de Usuarios y Permisos:**
-  * Autenticación con Firebase Auth (Correo/Contraseña y Google Sign-In).
+  * Autenticación con Firebase Auth (Usuario/Contraseña y Google Sign-In nativo en Android).
   * Control granular de roles (Administrador, Encargado, Cajero).
+  * Sincronización optimizada y no bloqueante de perfiles en Firestore.
 
-* **☁️ Sincronización en la Nube y CI/CD:**
+* **☁️ Sincronización en la Nube y CI/CD Unificado:**
   * Base de datos en tiempo real con **Firebase Firestore**.
-  * Reglas de seguridad declarativas en [firestore.rules](file:///d:/Proyectos/POSKlean/firestore.rules).
-  * Despliegue web automatizado a **Firebase Hosting**.
-  * Compilación y publicación automatizada de instaladores `.exe` y `.apk` mediante **GitHub Actions**.
+  * Reglas de seguridad declarativas en [firestore.rules](firestore.rules).
+  * **Versionado dinámico sincronizado:** Todas las variantes (Web, Windows y Android) comparten exactamente la misma versión del Git Tag.
+  * Compilación y publicación automatizada de instaladores `.exe`, `.apk` y despliegue a **Firebase Hosting** mediante **GitHub Actions**.
 
 ---
 
@@ -46,7 +48,7 @@ La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, a
 * **Estilos e Iconografía:** [Tailwind CSS v4](https://tailwindcss.com/), [Lucide React](https://lucide.dev/)
 * **Backend, Base de Datos y Auth:** [Firebase Firestore](https://firebase.google.com/docs/firestore), [Firebase Auth](https://firebase.google.com/docs/auth)
 * **Escritorio:** [Electron](https://www.electronjs.org/) y [electron-builder](https://www.electron.build/) (NSIS para Windows)
-* **Móvil:** [Capacitor](https://capacitorjs.com/) (Android / iOS)
+* **Móvil:** [Capacitor 8](https://capacitorjs.com/) (Android / iOS), [@capacitor-firebase/authentication](https://github.com/capawesome-team/capacitor-firebase), [@capgo/capacitor-printer](https://github.com/Cap-go/capacitor-printer)
 * **CI/CD & Hosting:** GitHub Actions, Firebase Hosting
 * **Calidad de Código:** [Oxlint](https://oxc.rs/)
 
@@ -56,39 +58,42 @@ La plataforma es **multiplataforma**: funciona como aplicación **Web / PWA**, a
 
 ```text
 POSKlean/
-├── .github/workflows/          # Flujos de CI/CD (Hosting y compilación de Releases)
-│   ├── firebase-hosting-merge.yml
-│   └── release.yml             # Compilación automática de .exe y .apk
+├── .github/workflows/          # Flujos de CI/CD automatizados
+│   ├── firebase-hosting-pruebas.yml  # Despliegue automático a entorno de pruebas (rama pruebas)
+│   └── release.yml             # Release unificado: resuelve versión y compila Web, .exe y .apk en paralelo
 ├── android/                    # Proyecto nativo de Android (Capacitor)
-├── build/                      # Recursos de compilación nativos (icon.ico, icon.png)
-├── electron/                   # Código del proceso principal de Electron
-│   ├── main.cjs                # Servidor local de producción e IPCs (print-silent)
+│   ├── debug.keystore          # Almacén de firmas debug unificado (SHA-1 registrado en Firebase)
+│   └── app/src/main/res/       # Iconos oficiales POSKlean en todas las densidades (mdpi a xxxhdpi)
+├── build/                      # Recursos de compilación para Windows (icon.ico, icon.png)
+├── electron/                   # Código de Electron y generadores de assets
+│   ├── main.cjs                # Servidor local de producción e IPCs (impresión silenciosa)
 │   ├── preload.cjs             # Bridge seguro hacia el frontend (contextBridge)
-│   ├── render-icon.cjs         # Renderizador vectorial de iconos con Chromium
+│   ├── render-icon.cjs         # Renderizador de iconos para Windows (.ico / .png)
+│   ├── generate-android-icons.cjs # Generador de iconos Android adaptativos y redondos
 │   └── generate-ico.ps1        # Generador de .ico multirresolución para Windows
-├── public/                     # Archivos estáticos, manifest PWA y favicon.svg
+├── public/                     # Archivos estáticos, manifest PWA y favicon.svg (logo vector oficial)
 ├── src/
 │   ├── assets/                 # Recursos gráficos y multimedia
 │   ├── components/             # Componentes modulares (POSCartPanel, PrintTicket, etc.)
 │   ├── hooks/                  # Custom Hooks (usePOSData, useCashShift)
-│   ├── services/               # Servicios de Firestore (sales, inventory, transfer, etc.)
+│   ├── services/               # Servicios de Firestore (sales, inventory, userService, etc.)
 │   ├── utils/                  # Formateadores de moneda, fechas y volúmenes
-│   ├── App.jsx                 # Controlador principal de vistas y estado global
-│   ├── firebase.js             # Configuración e inicialización del SDK de Firebase
+│   ├── App.jsx                 # Controlador principal de vistas, estado global y barra superior
+│   ├── firebase.js             # Inicialización y configuración de Firebase SDK
 │   └── main.jsx                # Punto de entrada de React
 ├── capacitor.config.json       # Configuración global de Capacitor
 ├── firestore.rules             # Reglas de seguridad de Firestore
 ├── firebase.json               # Configuración de Firebase Hosting
-└── vite.config.js              # Configuración del empaquetador Vite
+└── vite.config.js              # Configuración de Vite con inyección de __APP_VERSION__
 ```
 
 ---
 
 ## ⚙️ Requisitos Previos
 
-* [Node.js](https://nodejs.org/) (versión 20 LTS recomendada).
+* [Node.js](https://nodejs.org/) (versión 22 LTS recomendada).
 * `npm` (incluido con Node.js).
-* Para compilar Android localmente: [Android Studio](https://developer.android.com/studio) y JDK 17 o superior.
+* Para compilar Android localmente: [Android Studio](https://developer.android.com/studio) y **JDK 21** (requerido por Capacitor Android 8).
 * Proyecto activo en [Firebase Console](https://console.firebase.google.com/).
 
 ---
@@ -142,13 +147,7 @@ POSKlean/
   ```
   El instalador NSIS se generará en la carpeta `dist/`.
 
-* **Regenerar Iconos:**
-  ```bash
-  npm run electron:icons
-  ```
-  Renderiza automáticamente `build/icon.png` y `build/icon.ico` a partir de `public/favicon.svg`.
-
-### 2. Aplicación Móvil (Capacitor)
+### 2. Aplicación Móvil (Capacitor / Android)
 * **Sincronizar cambios web con las plataformas nativas:**
   ```bash
   npm run cap:sync
@@ -157,9 +156,27 @@ POSKlean/
   ```bash
   npm run cap:android
   ```
+* **Emulación / Depuración en vivo en dispositivo físico:**
+  ```bash
+  npm run cap:live
+  ```
 * **Abrir en Xcode (macOS):**
   ```bash
   npm run cap:ios
+  ```
+
+### 3. Generación de Iconos Oficiales
+* **Windows (Electron):**
+  ```bash
+  npm run electron:icons
+  ```
+* **Android (Todas las densidades mdpi a xxxhdpi y adaptativo):**
+  ```bash
+  npm run android:icons
+  ```
+* **Ambas plataformas simultáneamente:**
+  ```bash
+  npm run icons
   ```
 
 ---
@@ -175,36 +192,46 @@ POSKlean/
 | `npm run electron:dev` | Ejecuta la app en Electron enlazada a `localhost:5173`. |
 | `npm run electron:start` | Compila y ejecuta la versión empaquetada de Electron localmente. |
 | `npm run electron:build` | Genera el instalador de Windows nativo (`.exe` NSIS). |
-| `npm run electron:icons` | Reconstruye `icon.png` e `icon.ico` con proporciones vectoriales cuadradas. |
+| `npm run electron:icons` | Reconstruye `icon.png` e `icon.ico` vectoriales para Windows. |
+| `npm run android:icons` | Genera iconos adaptativos y legacy para Android desde `favicon.svg`. |
+| `npm run icons` | Genera los iconos de escritorio y móviles en un solo paso. |
 | `npm run cap:sync` | Compila la web y sincroniza con los proyectos Android e iOS. |
 | `npm run cap:android` | Sincroniza y abre el proyecto en Android Studio. |
+| `npm run cap:live` | Inicia el servidor para depuración en vivo en dispositivos móviles. |
 | `npm run cap:ios` | Sincroniza y abre el proyecto en Xcode. |
 
 ---
 
 ## 🤖 CI/CD y Publicación Automática (GitHub Actions)
 
-El repositorio incluye dos flujos de trabajo automatizados:
+El ciclo de publicación se gestiona mediante dos flujos de trabajo automatizados:
 
-1. **Despliegue Web Continuo ([firebase-hosting-merge.yml](file:///d:/Proyectos/POSKlean/.github/workflows/firebase-hosting-merge.yml)):**
-   * Cada push o merge a la rama `main` compila y despliega automáticamente la versión web a Firebase Hosting.
+### 1. Release Unificado ([release.yml](.github/workflows/release.yml))
+Se activa automáticamente al crear un Git Tag con el prefijo `v` (ejemplo: `v0.0.3`) o de forma manual con `workflow_dispatch`:
 
-2. **Compilación de Instaladores y Releases ([release.yml](file:///d:/Proyectos/POSKlean/.github/workflows/release.yml)):**
-   * Se activa al crear un Tag (ejemplo: `v1.0.0`) o de forma manual desde la pestaña **Actions** en GitHub.
-   * Compila el instalador de Windows (`.exe`) en un runner Windows.
-   * Compila el APK de Android (`.apk`) en un runner Linux con JDK 17 y Gradle.
-   * Publica automáticamente una **GitHub Release** con ambos archivos listos para descarga.
+1. **`get-version`**: Resuelve la versión dinámica a partir del Git Tag (removiendo el prefijo `v`).
+2. **Tareas en paralelo**:
+   * **`build-electron`**: Sincroniza la versión y genera `POSKlean Setup <version>.exe`.
+   * **`build-android`**: Sincroniza `package.json` y `versionName`, firma con `debug.keystore` unificado y genera `POSKlean-Android-v<version>.apk`.
+   * **`deploy-hosting`**: Compila la PWA inyectando la versión en el encabezado de la app y publica en Firebase Hosting (`channel: live`).
+3. **`publish-release`**: Publica el **GitHub Release** con los instaladores `.exe` y `.apk` adjuntos.
 
-|  `git tag v1.0.1` |
-| `git push origin v1.0.1` |
+#### ¿Cómo publicar una nueva versión?
+```bash
+git add .
+git commit -m "chore: release v0.0.4"
+git tag v0.0.4
+git push origin main --tags
+```
 
-
+### 2. Entorno de Pruebas ([firebase-hosting-pruebas.yml](.github/workflows/firebase-hosting-pruebas.yml))
+Cada push a la rama `pruebas` compila y despliega automáticamente al canal de pruebas de Firebase Hosting para validaciones previas antes de lanzar un release.
 
 ---
 
 ## 🌐 Enlaces del Proyecto
 
-* **Producción Web:** [https://posklean.web.app/](https://posklean.web.app/)
+* **Producción Web (PWA):** [https://posklean.web.app/](https://posklean.web.app/)
 * **Entorno de Pruebas:** [https://posklean--pruebas-p66zbkr1.web.app](https://posklean--pruebas-p66zbkr1.web.app)
 
 ---

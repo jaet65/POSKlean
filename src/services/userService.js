@@ -198,17 +198,21 @@ export async function syncUserProfile(firebaseUser) {
       updatedAt: nowIso,
     };
 
-    await setDoc(userRef, adminProfile, { merge: true });
+    // Actualización y limpieza en segundo plano para no congelar la pantalla de inicio
+    setDoc(userRef, adminProfile, { merge: true }).catch((error) => {
+      console.warn('No se pudo guardar adminProfile en background:', error);
+    });
 
-    // Perfiles antiguos del administrador (con ID aleatorio) quedan duplicados tras la migración.
-    try {
-      const legacy = await getDocs(query(collection(db, 'users'), where('email', '==', SUPER_ADMIN_EMAIL)));
-      await Promise.all(legacy.docs
-        .filter((legacyDoc) => legacyDoc.id !== firebaseUser.uid)
-        .map((legacyDoc) => deleteDoc(legacyDoc.ref)));
-    } catch (error) {
-      console.warn('No se pudieron limpiar perfiles antiguos del administrador:', error);
-    }
+    (async () => {
+      try {
+        const legacy = await getDocs(query(collection(db, 'users'), where('email', '==', SUPER_ADMIN_EMAIL)));
+        await Promise.all(legacy.docs
+          .filter((legacyDoc) => legacyDoc.id !== firebaseUser.uid)
+          .map((legacyDoc) => deleteDoc(legacyDoc.ref)));
+      } catch (error) {
+        console.warn('No se pudieron limpiar perfiles antiguos del administrador:', error);
+      }
+    })();
 
     return { id: firebaseUser.uid, ...adminProfile, authProvider: 'google' };
   }
@@ -221,7 +225,7 @@ export async function syncUserProfile(firebaseUser) {
       updates.photoURL = firebaseUser.photoURL;
     }
     if (data.status === 'active') {
-      await touchLastLogin(userRef, updates);
+      touchLastLogin(userRef, updates);
     }
     return { id: snapshot.id, ...data, ...updates, uid: firebaseUser.uid, authProvider: 'google' };
   }

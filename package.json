@@ -1,7 +1,7 @@
 {
   "name": "POSKlean",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "POSKlean Desktop Application",
   "author": "Klean",
   "type": "module",
@@ -12,6 +12,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "electron:icons": "electron electron/render-icon.cjs && powershell -ExecutionPolicy Bypass -File electron/generate-ico.ps1",
+    "android:icons": "electron electron/generate-android-icons.cjs",
+    "icons": "npm run electron:icons && npm run android:icons",
     "electron:dev": "cross-env ELECTRON_DEV=1 electron .",
     "electron:start": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --publish never",

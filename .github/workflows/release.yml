@@ -1,4 +1,4 @@
-name: Build and Release (Electron & Android)
+name: Release (Electron, Android & Hosting)
 
 on:
   push:
@@ -15,13 +15,44 @@ on:
         required: false
         type: boolean
         default: true
+      deploy_hosting:
+        description: 'Publicar versión web en Firebase Hosting (live)'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
+  get-version:
+    name: Resolver Versión
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version_step.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: version_step
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VER="${{ inputs.version }}"
+            VER="${VER#v}"
+          else
+            VER=$(node -p "require('./package.json').version")
+          fi
+          echo "Resolved version: $VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
   build-electron:
     name: Build Windows (.exe)
+    needs: get-version
     runs-on: windows-latest
     environment: .env.production
     steps:
@@ -37,19 +68,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set version from git tag
+      - name: Set version
         shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            echo "Sincronizando versión de package.json a $VERSION (desde git tag)..."
-            npm --no-git-tag-version version "$VERSION" --allow-same-version
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            VERSION="${{ inputs.version }}"
-            VERSION="${VERSION#v}"
-            echo "Sincronizando versión de package.json a $VERSION (desde input manual)..."
-            npm --no-git-tag-version version "$VERSION" --allow-same-version
-          fi
+          VERSION="${{ needs.get-version.outputs.version }}"
+          echo "Sincronizando versión de package.json a $VERSION..."
+          npm --no-git-tag-version version "$VERSION" --allow-same-version
 
       - name: Create environment file
         shell: bash
@@ -75,6 +99,7 @@ jobs:
 
   build-android:
     name: Build Android (.apk)
+    needs: get-version
     runs-on: ubuntu-latest
     environment: .env.production
     steps:
@@ -97,21 +122,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set version from git tag
+      - name: Set version
         shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            echo "Sincronizando versión a $VERSION..."
-            npm --no-git-tag-version version "$VERSION" --allow-same-version
-            sed -i "s/versionName \".*\"/versionName \"$VERSION\"/g" android/app/build.gradle
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            VERSION="${{ inputs.version }}"
-            VERSION="${VERSION#v}"
-            echo "Sincronizando versión a $VERSION..."
-            npm --no-git-tag-version version "$VERSION" --allow-same-version
-            sed -i "s/versionName \".*\"/versionName \"$VERSION\"/g" android/app/build.gradle
-          fi
+          VERSION="${{ needs.get-version.outputs.version }}"
+          echo "Sincronizando versión a $VERSION..."
+          npm --no-git-tag-version version "$VERSION" --allow-same-version
+          sed -i "s/versionName \".*\"/versionName \"$VERSION\"/g" android/app/build.gradle
 
       - name: Create environment file
         run: |
@@ -137,16 +154,8 @@ jobs:
       - name: Rename APK for release
         shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            cp android/app/build/outputs/apk/debug/app-debug.apk "POSKlean-Android-v${VERSION}.apk"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            VERSION="${{ inputs.version }}"
-            VERSION="${VERSION#v}"
-            cp android/app/build/outputs/apk/debug/app-debug.apk "POSKlean-Android-v${VERSION}.apk"
-          else
-            cp android/app/build/outputs/apk/debug/app-debug.apk POSKlean-Android.apk
-          fi
+          VERSION="${{ needs.get-version.outputs.version }}"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "POSKlean-Android-v${VERSION}.apk"
 
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v4
@@ -155,9 +164,55 @@ jobs:
           path: POSKlean-*.apk
           if-no-files-found: error
 
+  deploy-hosting:
+    name: Deploy Firebase Hosting (Live)
+    needs: get-version
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.deploy_hosting)
+    runs-on: ubuntu-latest
+    environment: .env.production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set version
+        shell: bash
+        run: |
+          VERSION="${{ needs.get-version.outputs.version }}"
+          echo "Sincronizando versión de package.json a $VERSION..."
+          npm --no-git-tag-version version "$VERSION" --allow-same-version
+
+      - name: Create environment variables file
+        run: |
+          echo "VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}" >> .env.production
+          echo "VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}" >> .env.production
+          echo "VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}" >> .env.production
+          echo "VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}" >> .env.production
+          echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" >> .env.production
+          echo "VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}" >> .env.production
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Deploy to Firebase Hosting (Live)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_POSKLEAN }}
+          channelId: live
+          projectId: posklean
+
   publish-release:
     name: Publish GitHub Release
-    needs: [build-electron, build-android]
+    needs: [get-version, build-electron, build-android]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
     runs-on: ubuntu-latest
     steps:
@@ -172,8 +227,8 @@ jobs:
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || (inputs.version && format('v{0}', inputs.version)) || 'v0.0.2' }}
-          name: Release ${{ github.ref_name || (inputs.version && format('v{0}', inputs.version)) || 'v0.0.2' }}
+          tag_name: v${{ needs.get-version.outputs.version }}
+          name: Release v${{ needs.get-version.outputs.version }}
           generate_release_notes: true
           files: |
             release-assets/**/*.exe
