@@ -74,7 +74,7 @@ Configure Firebase Authentication in `firebase.json` by adding an 'auth' block:
         "oAuthBrandDisplayName": "Your Brand Name",
         "supportEmail": "support@example.com",
         "authorizedRedirectUris": [
-          "https://my-project-id.firebaseapp.com/__/auth/handler",
+          "https://my-project-id.web.app/__/auth/handler",
           "http://localhost"
         ]
       }

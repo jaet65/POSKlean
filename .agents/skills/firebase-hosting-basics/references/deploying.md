@@ -9,7 +9,7 @@ npx -y firebase-tools@latest deploy --only hosting
 ```
 
 This deploys to your default sites (`PROJECT_ID.web.app` and
-`PROJECT_ID.firebaseapp.com`).
+`PROJECT_ID.web.app`).
 
 ## Preview Channels
 

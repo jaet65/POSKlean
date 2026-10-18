@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "26674469297",
+    "project_id": "posklean",
+    "storage_bucket": "posklean.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26674469297:android:e0862187772a9ebf688590",
+        "android_client_info": {
+          "package_name": "com.posklean.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26674469297-49nncuvgckcan6ltlcoiitv42b7dtdv2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.posklean.app",
+            "certificate_hash": "074ba02cfd7d165004635ee9c5faa8b0e701d552"
+          }
+        },
+        {
+          "client_id": "26674469297-tte017iv1n3n975cbc4l4rbu9gf1gehi.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFx8u1Pb89ZPfvm3gXQUNKr79UK0OaQZ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26674469297-tte017iv1n3n975cbc4l4rbu9gf1gehi.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

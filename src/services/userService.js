@@ -14,11 +14,15 @@ import {
 import { 
   createUserWithEmailAndPassword,
   deleteUser as deleteAuthUser,
+  GoogleAuthProvider,
   onAuthStateChanged, 
+  signInWithCredential,
   signInWithEmailAndPassword,
   signInWithPopup, 
   signOut 
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, db, getProvisioningAuth, googleProvider } from '../firebase';
 
 export const SUPER_ADMIN_EMAIL = 'agrazmario@gmail.com';
@@ -80,10 +84,27 @@ export async function loginWithGoogle() {
   if (!auth) {
     throw new Error('Firebase Auth no está inicializado. Revisa las variables de entorno de Firebase.');
   }
+
+  if (Capacitor.isNativePlatform()) {
+    const result = await FirebaseAuthentication.signInWithGoogle();
+    if (result.credential?.idToken) {
+      const credential = GoogleAuthProvider.credential(result.credential.idToken);
+      return await signInWithCredential(auth, credential);
+    }
+    return result;
+  }
+
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function logoutUser() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await FirebaseAuthentication.signOut();
+    } catch (e) {
+      console.warn('Native signOut error:', e);
+    }
+  }
   if (auth) {
     await signOut(auth);
   }

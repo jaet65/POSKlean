@@ -113,8 +113,8 @@ function registerGlobalKioskShortcuts() {
   ];
   for (const shortcut of blockedShortcuts) {
     try {
-      globalShortcut.register(shortcut, () => {});
-    } catch {}
+      globalShortcut.register(shortcut, () => { });
+    } catch { }
   }
 }
 
@@ -172,7 +172,7 @@ async function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url) && !url.includes('firebaseapp.com') && !url.includes('accounts.google.com')) {
+    if (/^https?:/.test(url) && !url.includes('web.app') && !url.includes('accounts.google.com')) {
       shell.openExternal(url);
       return { action: 'deny' };
     }

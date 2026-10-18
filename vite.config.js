@@ -6,4 +6,17 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss()],
+  server: {
+    host: true,
+    port: 5173,
+  },
+  optimizeDeps: {
+    include: [
+      '@capacitor/core',
+      '@capgo/capacitor-printer',
+      'firebase/app',
+      'firebase/auth',
+      'firebase/firestore',
+    ],
+  },
 })

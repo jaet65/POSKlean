@@ -10,15 +10,15 @@ import ExitConfirmModal from './components/ExitConfirmModal';
 import { DEFAULT_CHANNELS, subscribeToSalesChannels } from './services/channelService';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
-import { 
-  ShoppingCart, 
-  Package, 
-  TrendingUp, 
-  AlertTriangle, 
-  CheckCircle, 
-  Store, 
-  Truck, 
-  MessageSquare, 
+import {
+  ShoppingCart,
+  Package,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Store,
+  Truck,
+  MessageSquare,
   DollarSign,
   Banknote,
   CreditCard,
@@ -39,6 +39,8 @@ import {
   Menu as MenuIcon,
   Power,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Printer as NativePrinter } from '@capgo/capacitor-printer';
 import { usePOSData } from './hooks/usePOSData';
 import { useCashShift } from './hooks/useCashShift';
 import {
@@ -132,7 +134,7 @@ export default function App() {
   const pendingSalesCount = pendingEntries.filter((entry) => !entry.error).length;
   const refreshOffline = () => listPendingSales()
     .then(setPendingEntries)
-    .catch(() => {})
+    .catch(() => { })
     .finally(() => setLocalShiftState(getLocalShift()));
 
   useEffect(() => {
@@ -157,7 +159,7 @@ export default function App() {
   const [lastCompletedSale, setLastCompletedSale] = useState(null);
   const [isSavingReceiptWidth, setIsSavingReceiptWidth] = useState(false);
   const [dayRange, setDayRange] = useState(INITIAL_DAY_RANGE);
-  
+
   // POS State
   const [cart, setCart] = useState([]);
   const [lastCartTouch, setLastCartTouch] = useState({ id: null, n: 0 });
@@ -239,8 +241,8 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const canAccessUsers = currentUser?.role === 'admin' 
-    || currentUser?.permissions?.users 
+  const canAccessUsers = currentUser?.role === 'admin'
+    || currentUser?.permissions?.users
     || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
 
   const isAdmin = currentUser?.role === 'admin';
@@ -400,12 +402,36 @@ export default function App() {
   useEffect(() => {
     if (!ticketToPrint) return undefined;
 
+    let isMounted = true;
+
+    if (Capacitor.isNativePlatform()) {
+      const timeoutId = window.setTimeout(async () => {
+        try {
+          await NativePrinter.printWebView({
+            name: `Ticket-${ticketToPrint.data?.ticketId || ticketToPrint.data?.orderNumber || 'POS'}`,
+          });
+        } catch (err) {
+          console.error('Error al imprimir ticket en móvil:', err);
+        } finally {
+          if (isMounted) setTicketToPrint(null);
+        }
+      }, 150);
+
+      return () => {
+        isMounted = false;
+        window.clearTimeout(timeoutId);
+      };
+    }
+
     const clearPrintedDocument = () => {
       setTicketToPrint(null);
     };
     window.addEventListener('afterprint', clearPrintedDocument);
     window.print();
-    return () => window.removeEventListener('afterprint', clearPrintedDocument);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('afterprint', clearPrintedDocument);
+    };
   }, [ticketToPrint]);
 
   useEffect(() => {
@@ -1250,8 +1276,8 @@ export default function App() {
     setIsSavingUser(true);
     setUserFormError('');
     try {
-      const targetIdentifier = userForm.authType === 'credentials' 
-        ? userForm.username.toLowerCase().trim() 
+      const targetIdentifier = userForm.authType === 'credentials'
+        ? userForm.username.toLowerCase().trim()
         : userForm.email.toLowerCase().trim();
 
       if (editingUser) {
@@ -1309,7 +1335,7 @@ export default function App() {
             <h1 className="text-2xl font-black text-white tracking-tight mt-3">
               POS<span className="text-cyan-400">Klean</span>
             </h1>
-            <p className="text-xs text-slate-400 mt-1 font-medium">Control de Inventarios • Punto de Venta</p>
+            <p className="text-xs text-slate-400 mt-1 font-medium">Inicia sesión para continuar</p>
           </div>
 
           {/* Switch Modo de Ingreso */}
@@ -1317,11 +1343,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => { setLoginMode('credentials'); setAuthError(''); }}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                loginMode === 'credentials'
-                  ? 'bg-cyan-500 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${loginMode === 'credentials'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+                }`}
             >
               <User className="w-3.5 h-3.5" />
               <span>Usuario / Clave</span>
@@ -1329,11 +1354,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => { setLoginMode('google'); setAuthError(''); }}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                loginMode === 'google'
-                  ? 'bg-cyan-500 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${loginMode === 'google'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+                }`}
             >
               <Lock className="w-3.5 h-3.5" />
               <span>Google</span>
@@ -1555,7 +1579,7 @@ export default function App() {
           {pendingSalesCount > 0 && `${pendingSalesCount} venta(s) pendiente(s) de sincronizar.`}
         </div>
       )}
-      
+
       {/* Top Navbar */}
       <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 px-3 py-3 shadow-md sm:px-4 lg:gap-4 xl:px-6">
         <div className="flex shrink-0 items-center space-x-3">
@@ -1572,11 +1596,10 @@ export default function App() {
 
         {/* Global Quick Metrics & User Info */}
         <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
-          <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${
-            lowStockCount > 0 
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse' 
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-          }`}>
+          <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${lowStockCount > 0
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            }`}>
             <AlertTriangle className="w-4 h-4" />
             <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
           </div>
@@ -1705,11 +1728,10 @@ export default function App() {
               <p className="text-xs font-semibold text-slate-200 leading-tight truncate max-w-32.5">
                 {currentUser.displayName || currentUser.username || (currentUser.email ? currentUser.email.split('@')[0] : 'Usuario')}
               </p>
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
-                currentUser.role === 'admin' ? 'bg-purple-500/20 text-purple-300' :
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md ${currentUser.role === 'admin' ? 'bg-purple-500/20 text-purple-300' :
                 currentUser.role === 'supervisor' ? 'bg-blue-500/20 text-blue-300' :
-                'bg-emerald-500/20 text-emerald-300'
-              }`}>
+                  'bg-emerald-500/20 text-emerald-300'
+                }`}>
                 {currentUser.role === 'admin' ? 'Admin' : currentUser.role}
               </span>
             </div>
@@ -1723,7 +1745,7 @@ export default function App() {
             </button>
           </div>
 
-          {isElectron && (
+          {/*{isElectron && (
             <button
               type="button"
               onClick={() => setShowExitConfirmModal(true)}
@@ -1733,7 +1755,7 @@ export default function App() {
               <Power className="h-4 w-4 text-rose-400" />
               <span className="hidden sm:inline">Apagar</span>
             </button>
-          )}
+          )}*/}
         </div>
 
         {/* Sidebar */}
@@ -1772,28 +1794,26 @@ export default function App() {
               onClick={() => setActiveTab('pos')}
               aria-label="Punto de Venta"
               title="Punto de Venta"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'pos' 
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'pos'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <ShoppingCart className="w-4 h-4" />
               <span className="hidden lg:inline">Punto de Venta</span>
             </button>
           )}
-          
+
           {canAccessInventory && (
             <button
               type="button"
               onClick={() => setActiveTab('inventory')}
               aria-label="Inventario"
               title="Inventario"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'inventory' 
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'inventory'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <Package className="w-4 h-4" />
               <span className="hidden lg:inline">Inventario</span>
@@ -1813,11 +1833,10 @@ export default function App() {
                 ? `Compras, ${pendingPurchaseRequestsCount} solicitudes pendientes`
                 : 'Compras'}
               title="Compras"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'purchases' 
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'purchases'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <Truck className="w-4 h-4" />
               <span className="hidden lg:inline">Compras</span>
@@ -1835,11 +1854,10 @@ export default function App() {
               onClick={() => setActiveTab('catalog')}
               aria-label="Catálogo"
               title="Catálogo"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'catalog'
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'catalog'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <Layers className="w-4 h-4" />
               <span className="hidden lg:inline">Catálogo</span>
@@ -1852,11 +1870,10 @@ export default function App() {
               onClick={() => setActiveTab('sales')}
               aria-label="Ventas y Reportes"
               title="Ventas y Reportes"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'sales' 
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'sales'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <TrendingUp className="w-4 h-4" />
               <span className="hidden lg:inline">Ventas / Reporte</span>
@@ -1869,11 +1886,10 @@ export default function App() {
               onClick={() => setActiveTab('users')}
               aria-label="Administración"
               title="Administración"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
-                visibleTab === 'users' 
-                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'users'
+                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
             >
               <Settings className="w-4 h-4" />
               <span className="hidden lg:inline">Administración</span>
@@ -1903,7 +1919,7 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      { (dataError || actionError) && (
+      {(dataError || actionError) && (
         <div role="alert" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5">
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {dataError || actionError}
@@ -1958,7 +1974,7 @@ export default function App() {
         )}
         {visibleTab === 'pos' && canUsePos && !(activeStoreId && !isCashShiftOpen) && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
-            
+
             <POSCatalog
               availableCategories={availableCategories}
               cart={cart}
@@ -2043,7 +2059,7 @@ export default function App() {
                 </button>
               </div>
             )}
-            
+
             {/* Header Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {currentUser.role !== 'cajero' && (
@@ -2185,14 +2201,14 @@ export default function App() {
                                 : movement.type === 'transfer_in'
                                   ? `Transferencia de ${counterpartName}`
                                   : movement.type === 'restock'
-                                ? 'Resurtido'
-                                : movement.type === 'purchase'
-                                  ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
-                                  : movement.type === 'sale'
-                                  ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
-                                  : movement.type === 'audit'
-                                    ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`
-                                    : 'Producto creado';
+                                    ? 'Resurtido'
+                                    : movement.type === 'purchase'
+                                      ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
+                                      : movement.type === 'sale'
+                                        ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
+                                        : movement.type === 'audit'
+                                          ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`
+                                          : 'Producto creado';
                               const quantity = Math.abs(movement.amount || 0);
                               return (
                                 <tr key={movement.id} className="hover:bg-slate-700/30">
@@ -2681,7 +2697,7 @@ export default function App() {
         {/* TAB 3: VENTAS Y REPORTE DIARIO */}
         {visibleTab === 'sales' && canAccessSales && (
           <div className="space-y-5">
-            
+
             {/* Indicador: cajero ve solo sus ventas */}
             {isCajero && (
               <div className="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl text-xs flex items-center gap-2">
@@ -2897,11 +2913,10 @@ export default function App() {
                         <td className="px-4 py-3 font-mono font-bold text-cyan-400">{sale.ticketId}</td>
                         <td className="px-4 py-3 text-slate-400">{sale.timestamp}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            sale.channel === 'Mostrador' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${sale.channel === 'Mostrador' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
                             sale.channel === 'Uber Flash' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
-                            'bg-green-500/10 text-green-300 border-green-500/30'
-                          }`}>
+                              'bg-green-500/10 text-green-300 border-green-500/30'
+                            }`}>
                             {sale.channel}
                           </span>
                         </td>
@@ -2919,14 +2934,13 @@ export default function App() {
                             </span>
                           </div>
                           {sale.createdBy?.userRole && (
-                            <span className={`mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-semibold border ${
-                              sale.createdBy.userRole === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
+                            <span className={`mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-semibold border ${sale.createdBy.userRole === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
                               sale.createdBy.userRole === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
-                              'bg-slate-500/15 text-slate-400 border-slate-500/30'
-                            }`}>
+                                'bg-slate-500/15 text-slate-400 border-slate-500/30'
+                              }`}>
                               {sale.createdBy.userRole === 'admin' ? 'Admin' :
-                               sale.createdBy.userRole === 'supervisor' ? 'Supervisor' :
-                               sale.createdBy.userRole === 'cajero' ? 'Cajero' : sale.createdBy.userRole}
+                                sale.createdBy.userRole === 'supervisor' ? 'Supervisor' :
+                                  sale.createdBy.userRole === 'cajero' ? 'Cajero' : sale.createdBy.userRole}
                             </span>
                           )}
                         </td>
@@ -2998,7 +3012,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
-        POSKlean • Gestión de inventarios y punto de venta integral. 
+        POSKlean • Gestión de inventarios y punto de venta integral.
       </footer>
 
       {showChannelModal && (
@@ -3038,9 +3052,8 @@ export default function App() {
                       setShowChannelModal(false);
                       if (pending) handleSelectProductToCart(pending, channelName);
                     }}
-                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 ${
-                      selectedChannel === channelName ? 'border-cyan-500' : 'border-slate-700'
-                    }`}
+                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 ${selectedChannel === channelName ? 'border-cyan-500' : 'border-slate-700'
+                      }`}
                   >
                     <Icon className={`h-6 w-6 ${color}`} />
                     <span>{channelName}</span>
@@ -3437,37 +3450,35 @@ export default function App() {
             <form onSubmit={handleSaveUser} className="space-y-4">
               {/* Selector de Tipo de Cuenta: solo al editar; las cuentas nuevas son usuario/contraseña */}
               {editingUser && (
-              <div>
-                <label className="text-xs text-slate-300 block mb-1 font-medium">
-                  Tipo de Acceso / Autenticación:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
-                      userForm.authType === 'credentials'
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1 font-medium">
+                    Tipo de Acceso / Autenticación:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled
+                      className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'credentials'
                         ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
                         : 'bg-slate-900 border-slate-700 text-slate-400'
-                    }`}
-                  >
-                    <User className="w-3.5 h-3.5" />
-                    <span>Usuario / Clave</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
-                      userForm.authType === 'google'
+                        }`}
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span>Usuario / Clave</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'google'
                         ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
                         : 'bg-slate-900 border-slate-700 text-slate-400'
-                    }`}
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Google</span>
-                  </button>
+                        }`}
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Google</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
               )}
 
               {userForm.authType === 'credentials' ? (

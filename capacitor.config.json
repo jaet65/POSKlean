@@ -1,5 +1,17 @@
 {
   "appId": "com.posklean.app",
   "appName": "POSKlean",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "http://192.168.1.16:5173",
+    "cleartext": true
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": [
+        "google.com"
+      ]
+    }
+  }
 }

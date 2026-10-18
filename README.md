@@ -110,7 +110,7 @@ POSKlean/
    Crea un archivo `.env.local` en la raíz con tus credenciales de Firebase:
    ```env
    VITE_FIREBASE_API_KEY=tu_api_key
-   VITE_FIREBASE_AUTH_DOMAIN=tu_proyecto.firebaseapp.com
+   VITE_FIREBASE_AUTH_DOMAIN=tu_proyecto.web.app
    VITE_FIREBASE_PROJECT_ID=tu_proyecto
    VITE_FIREBASE_STORAGE_BUCKET=tu_proyecto.firebasestorage.app
    VITE_FIREBASE_MESSAGING_SENDER_ID=tu_sender_id
