@@ -6,6 +6,7 @@ import InventoryTable from './components/InventoryTable';
 import PurchasingPanel from './components/PurchasingPanel';
 import CatalogPanel from './components/CatalogPanel';
 import AdminPanel from './components/admin/AdminPanel';
+import ExitConfirmModal from './components/ExitConfirmModal';
 import { DEFAULT_CHANNELS, subscribeToSalesChannels } from './services/channelService';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
@@ -36,6 +37,7 @@ import {
   Settings,
   Cog,
   Menu as MenuIcon,
+  Power,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
 import { useCashShift } from './hooks/useCashShift';
@@ -103,6 +105,13 @@ const MIN_RECEIPT_WIDTH_MM = 30;
 const MAX_RECEIPT_WIDTH_MM = 120;
 
 export default function App() {
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
+  const isElectron = Boolean(window?.posNative?.exitApp);
+  const handleExitApp = () => {
+    if (window?.posNative?.exitApp) {
+      window.posNative.exitApp();
+    }
+  };
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [stores, setStores] = useState([]);
   const [storesLoaded, setStoresLoaded] = useState(false);
@@ -1415,7 +1424,26 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {isElectron && (
+            <div className="pt-2 border-t border-slate-800 text-center">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(true)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-400/90 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition cursor-pointer"
+              >
+                <Power className="w-3.5 h-3.5 text-rose-400" />
+                <span>Cerrar aplicación (Kiosko)</span>
+              </button>
+            </div>
+          )}
         </div>
+
+        <ExitConfirmModal
+          isOpen={showExitConfirmModal}
+          onClose={() => setShowExitConfirmModal(false)}
+          onConfirm={handleExitApp}
+        />
       </div>
     );
   }
@@ -1445,7 +1473,24 @@ export default function App() {
             <LogOut className="w-4 h-4" />
             <span>Cerrar Sesión / Usar Otra Cuenta</span>
           </button>
+
+          {isElectron && (
+            <button
+              type="button"
+              onClick={() => setShowExitConfirmModal(true)}
+              className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold rounded-2xl text-xs transition border border-rose-500/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Power className="w-4 h-4 text-rose-400" />
+              <span>Cerrar Aplicación (Kiosko)</span>
+            </button>
+          )}
         </div>
+
+        <ExitConfirmModal
+          isOpen={showExitConfirmModal}
+          onClose={() => setShowExitConfirmModal(false)}
+          onConfirm={handleExitApp}
+        />
       </div>
     );
   }
@@ -1480,7 +1525,24 @@ export default function App() {
             <LogOut className="w-4 h-4" />
             Cerrar Sesión
           </button>
+
+          {isElectron && (
+            <button
+              type="button"
+              onClick={() => setShowExitConfirmModal(true)}
+              className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold rounded-2xl text-xs transition border border-rose-500/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Power className="w-4 h-4 text-rose-400" />
+              <span>Cerrar Aplicación (Kiosko)</span>
+            </button>
+          )}
         </div>
+
+        <ExitConfirmModal
+          isOpen={showExitConfirmModal}
+          onClose={() => setShowExitConfirmModal(false)}
+          onConfirm={handleExitApp}
+        />
       </div>
     );
   }
@@ -1660,6 +1722,18 @@ export default function App() {
               <LogOut className="w-4 h-4" />
             </button>
           </div>
+
+          {isElectron && (
+            <button
+              type="button"
+              onClick={() => setShowExitConfirmModal(true)}
+              title="Apagar / Cerrar aplicación"
+              className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-100 cursor-pointer shadow-sm"
+            >
+              <Power className="h-4 w-4 text-rose-400" />
+              <span className="hidden sm:inline">Apagar</span>
+            </button>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -1809,6 +1883,21 @@ export default function App() {
                 </span>
               )}
             </button>
+          )}
+
+          {isElectron && (
+            <div className="mt-auto pt-2 border-t border-slate-700/80">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(true)}
+                aria-label="Cerrar aplicación"
+                title="Cerrar aplicación"
+                className={`flex-none flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 text-rose-400 hover:text-rose-200 hover:bg-rose-500/10 cursor-pointer w-full gap-2 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
+              >
+                <Power className="w-4 h-4 shrink-0" />
+                <span className="hidden lg:inline text-xs font-semibold">Cerrar App</span>
+              </button>
+            </div>
           )}
         </nav>
       </header>
@@ -3620,6 +3709,12 @@ export default function App() {
       )}
 
       <PrintTicket ticket={ticketToPrint} receiptWidth={receiptWidth} stores={stores} />
+
+      <ExitConfirmModal
+        isOpen={showExitConfirmModal}
+        onClose={() => setShowExitConfirmModal(false)}
+        onConfirm={handleExitApp}
+      />
 
     </div>
   );
