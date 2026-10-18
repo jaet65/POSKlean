@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Versión del release (ej: 0.0.3, omitir para usar tag o package.json)'
+        required: false
+        type: string
       create_release:
         description: 'Crear GitHub Release con los instaladores'
         required: false
@@ -32,6 +36,20 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Set version from git tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "Sincronizando versión de package.json a $VERSION (desde git tag)..."
+            npm --no-git-tag-version version "$VERSION" --allow-same-version
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            echo "Sincronizando versión de package.json a $VERSION (desde input manual)..."
+            npm --no-git-tag-version version "$VERSION" --allow-same-version
+          fi
 
       - name: Create environment file
         shell: bash
@@ -79,6 +97,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set version from git tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "Sincronizando versión a $VERSION..."
+            npm --no-git-tag-version version "$VERSION" --allow-same-version
+            sed -i "s/versionName \".*\"/versionName \"$VERSION\"/g" android/app/build.gradle
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            echo "Sincronizando versión a $VERSION..."
+            npm --no-git-tag-version version "$VERSION" --allow-same-version
+            sed -i "s/versionName \".*\"/versionName \"$VERSION\"/g" android/app/build.gradle
+          fi
+
       - name: Create environment file
         run: |
           echo "VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}" >> .env.production
@@ -101,14 +135,24 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Rename APK for release
+        shell: bash
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk POSKlean-Android.apk
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            cp android/app/build/outputs/apk/debug/app-debug.apk "POSKlean-Android-v${VERSION}.apk"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            cp android/app/build/outputs/apk/debug/app-debug.apk "POSKlean-Android-v${VERSION}.apk"
+          else
+            cp android/app/build/outputs/apk/debug/app-debug.apk POSKlean-Android.apk
+          fi
 
       - name: Upload Android APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: posklean-android-apk
-          path: POSKlean-Android.apk
+          path: POSKlean-*.apk
           if-no-files-found: error
 
   publish-release:
@@ -128,8 +172,8 @@ jobs:
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || 'v1.0.0' }}
-          name: Release ${{ github.ref_name || 'v1.0.0' }}
+          tag_name: ${{ github.ref_name || (inputs.version && format('v{0}', inputs.version)) || 'v0.0.2' }}
+          name: Release ${{ github.ref_name || (inputs.version && format('v{0}', inputs.version)) || 'v0.0.2' }}
           generate_release_notes: true
           files: |
             release-assets/**/*.exe
