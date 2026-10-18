@@ -1505,7 +1505,6 @@ export default function App() {
               POS<span className="text-cyan-400">Klean</span>
               <span className="text-xs bg-slate-700 text-cyan-300 font-mono px-2 py-0.5 rounded-full border border-slate-600">v1.0</span>
             </h1>
-            <p className="text-xs text-slate-400">• Control • Inventarios •</p>
           </div>
         </div>
 
@@ -2910,7 +2909,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
-        POSKlean • Gestión de inventarios y punto de venta integral. • 
+        POSKlean • Gestión de inventarios y punto de venta integral. 
       </footer>
 
       {showChannelModal && (

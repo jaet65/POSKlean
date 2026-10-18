@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Builds & Executables
+dist_electron/
+release/
+*.exe
+*.apk
+*.aab
+

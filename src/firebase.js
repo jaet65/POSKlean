@@ -29,6 +29,9 @@ const app = firebaseConfigError
 export const db = app ? getFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 
 const SECONDARY_APP_NAME = 'posklean-user-provisioning';
 
