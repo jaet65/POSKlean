@@ -12,7 +12,7 @@ const validCashAmount = (amount) => Number.isFinite(amount)
   && amount >= 0
   && Number((amount * 100).toFixed(0)) / 100 === amount;
 
-export async function openCashShift({ storeId, user, openingCash }) {
+export async function openCashShift({ storeId, user, openingCash, shiftId }) {
   if (!db) throw new Error('Firestore no está inicializado.');
   const cashierId = user?.id || user?.uid;
   if (typeof storeId !== 'string' || !storeId.trim() || !cashierId) {
@@ -24,7 +24,7 @@ export async function openCashShift({ storeId, user, openingCash }) {
 
   const registerRef = doc(db, 'cashRegisters', cashierId);
   const storeRef = doc(db, 'stores', storeId);
-  const shiftRef = doc(collection(db, 'cashShifts'));
+  const shiftRef = shiftId ? doc(db, 'cashShifts', shiftId) : doc(collection(db, 'cashShifts'));
   const cashier = userInfo(user);
 
   await runTransaction(db, async (transaction) => {

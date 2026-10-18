@@ -621,7 +621,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
     );
   };
 
-  const tabClass = (id) => `flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+  const tabClass = (id) => `flex items-center gap-1 sm:gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] sm:px-4 sm:py-2 sm:text-sm font-medium transition ${
     visibleSection === id
       ? 'bg-cyan-500 text-slate-950 font-semibold'
       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -630,9 +630,9 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 rounded-xl border border-slate-700/80 bg-slate-900 p-1">
+        <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900 p-1">
           <button type="button" onClick={() => setSection('orders')} className={tabClass('orders')}>
-            <Truck className="h-4 w-4" /> Órdenes de compra
+            <Truck className="h-4 w-4" /> Órdenes
           </button>
           {canManagePurchases && (
             <button type="button" onClick={() => setSection('requests')} className={tabClass('requests')}>
@@ -653,7 +653,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
             type="button"
             onClick={openOrderModal}
             disabled={stores.length === 0 || activeSuppliers.length === 0 || (products.length === 0 && catalog.length === 0)}
-            className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1 sm:gap-2 rounded-xl bg-cyan-500 px-2.5 py-1.5 text-[11px] sm:px-4 sm:py-2 sm:text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" /> Nueva orden
           </button>
@@ -661,7 +661,7 @@ export default function PurchasingPanel({ currentUser, activeStoreId, stores = [
           <button
             type="button"
             onClick={() => openSupplierModal()}
-            className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400"
+            className="flex items-center gap-1 sm:gap-2 rounded-xl bg-cyan-500 px-2.5 py-1.5 text-[11px] sm:px-4 sm:py-2 sm:text-xs font-bold text-slate-950 hover:bg-cyan-400"
           >
             <Plus className="h-4 w-4" /> Nuevo proveedor
           </button>

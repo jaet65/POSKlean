@@ -86,14 +86,14 @@ export default function InventoryTable({
           <p className="text-xs text-slate-400 mt-0.5">Barra: rojo en o bajo mínimo · ámbar próximo · verde suficiente. Marca blanca: mínimo.</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {isStoreManager && activeStoreCount > 1 && (
             <button
               type="button"
               onClick={onOpenTransfer}
-              className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-cyan-500/30"
+              className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 font-bold px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[11px] sm:text-xs transition flex items-center gap-1 sm:gap-1.5 cursor-pointer border border-cyan-500/30"
             >
-              <ArrowLeftRight className="w-4 h-4" />
+              <ArrowLeftRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span>Transferir</span>
             </button>
           )}
@@ -101,18 +101,18 @@ export default function InventoryTable({
             <button
               type="button"
               onClick={onOpenInventoryAudit}
-              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-amber-500/30"
+              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 font-bold px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[11px] sm:text-xs transition flex items-center gap-1 sm:gap-1.5 cursor-pointer border border-amber-500/30"
             >
-              <ClipboardCheck className="w-4 h-4" />
+              <ClipboardCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span>Auditoría</span>
             </button>
           )}
           <button
             type="button"
             onClick={onOpenHistory}
-            className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-600"
+            className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[11px] sm:text-xs transition flex items-center gap-1 sm:gap-1.5 cursor-pointer border border-slate-600"
           >
-            <History className="w-4 h-4" />
+            <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Historial</span>
           </button>
         </div>

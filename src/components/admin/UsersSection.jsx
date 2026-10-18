@@ -87,7 +87,7 @@ function UserRow({ user, stores, storeNameById, onEditUser, onDeleteUser }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+        <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
           user.status === 'active' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
           user.status === 'pending' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse' :
           'bg-red-500/15 text-red-300 border-red-500/30'

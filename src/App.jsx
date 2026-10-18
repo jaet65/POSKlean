@@ -33,6 +33,9 @@ import {
   User,
   History,
   ClipboardCheck,
+  Settings,
+  Cog,
+  Menu as MenuIcon,
 } from 'lucide-react';
 import { usePOSData } from './hooks/usePOSData';
 import { useCashShift } from './hooks/useCashShift';
@@ -41,7 +44,15 @@ import {
   updateProductMinStock as saveMinStock,
   completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
-import { createSale } from './services/salesService';
+import {
+  closeCashShiftResilient,
+  createSaleResilient,
+  flushPendingSales,
+  getLocalShift,
+  listPendingSales,
+  openCashShiftResilient,
+  sumPendingSales,
+} from './services/offlineSales';
 import { createPurchaseRequest, subscribeToPurchaseRequests } from './services/purchaseService';
 import { setStorePriceOverride } from './services/catalogService';
 import { transferInventory } from './services/transferService';
@@ -105,6 +116,32 @@ export default function App() {
   const [actionError, setActionError] = useState('');
   const [pendingPurchaseRequestsCount, setPendingPurchaseRequestsCount] = useState(0);
   const [isSavingSale, setIsSavingSale] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingEntries, setPendingEntries] = useState([]);
+  const [localShift, setLocalShiftState] = useState(() => getLocalShift());
+  const pendingSalesCount = pendingEntries.filter((entry) => !entry.error).length;
+  const refreshOffline = () => listPendingSales()
+    .then(setPendingEntries)
+    .catch(() => {})
+    .finally(() => setLocalShiftState(getLocalShift()));
+
+  useEffect(() => {
+    const refresh = refreshOffline;
+    const sync = () => flushPendingSales().then(refresh).catch(refresh);
+    const handleOnline = () => { setIsOnline(true); sync(); };
+    const handleOffline = () => { setIsOnline(false); refresh(); };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    refresh();
+    if (navigator.onLine) sync();
+    const interval = setInterval(() => { refresh(); if (navigator.onLine) sync(); }, 30000);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(interval);
+    };
+  }, []);
   const [isSubmittingPurchaseRequest, setIsSubmittingPurchaseRequest] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState(null);
   const [ticketToPrint, setTicketToPrint] = useState(null);
@@ -240,11 +277,26 @@ export default function App() {
     : [];
   const purchaseRequestStoreIdsKey = purchaseRequestStoreIds.join('|');
   const canUsePos = canAccessPos && !isGeneralView;
-  const { shift: cashShift, loading: cashShiftLoading, error: cashShiftError } = useCashShift(
+  const { shift: hookShift, loading: hookShiftLoading, error: hookShiftError } = useCashShift(
     activeStoreId,
     currentUserId,
     Boolean(canUsePos && activeStoreId && currentUserId),
   );
+  const cashShift = useMemo(() => {
+    const own = localShift && localShift.cashierId === currentUserId ? localShift : null;
+    const base = own && (own.id !== hookShift?.id || own.status === 'closed') ? own : hookShift;
+    if (!base || base.status !== 'open') return base;
+    const pending = sumPendingSales(pendingEntries, base.id);
+    if (!pending.saleCount) return base;
+    const totals = { ...(base.paymentTotalsCents || {}) };
+    Object.keys(pending.paymentTotalsCents).forEach((method) => {
+      totals[method] = (totals[method] || 0) + pending.paymentTotalsCents[method];
+    });
+    return { ...base, paymentTotalsCents: totals, saleCount: (base.saleCount || 0) + pending.saleCount };
+  }, [hookShift, localShift, pendingEntries, currentUserId]);
+  const usingLocalShift = Boolean(cashShift?.localOnly);
+  const cashShiftLoading = usingLocalShift ? false : hookShiftLoading;
+  const cashShiftError = usingLocalShift ? null : hookShiftError;
   const isCashShiftOpen = cashShift?.status === 'open' && cashShift.storeId === activeStoreId;
   const cashShiftStoreMismatch = cashShift?.status === 'open' && !isCashShiftOpen;
   const [usersLoadedForUserId, setUsersLoadedForUserId] = useState(null);
@@ -662,7 +714,7 @@ export default function App() {
     setActionError('');
     setIsSavingSale(true);
     try {
-      const sale = await createSale({
+      const sale = await createSaleResilient({
         cart,
         channel: selectedChannel,
         paymentMethod,
@@ -671,6 +723,7 @@ export default function App() {
         storeId: activeStoreId,
       });
       setCart([]);
+      refreshOffline();
       setSelectedChannel(null);
       setCartQuantityDrafts({});
       setShowPaymentModal(false);
@@ -690,13 +743,14 @@ export default function App() {
     setCashShiftActionError('');
     setIsSavingCashShift(true);
     try {
-      await openCashShift({
+      await openCashShiftResilient({
         storeId: activeStoreId,
         user: currentUser,
         openingCash: Number(openingCashDraft),
       });
       setCashShiftModal(null);
       setOpeningCashDraft('0');
+      refreshOffline();
     } catch (error) {
       setCashShiftActionError(error.message || 'No se pudo abrir el turno.');
     } finally {
@@ -714,14 +768,15 @@ export default function App() {
     setCashShiftActionError('');
     setIsSavingCashShift(true);
     try {
-      const closedShift = await closeCashShift({
-        shiftId: cashShift.id,
+      const closedShift = await closeCashShiftResilient({
+        shift: cashShift,
         storeId: activeStoreId,
         user: currentUser,
         countedCash: Number(countedCashDraft),
       });
       setCashShiftModal(null);
       setCountedCashDraft('');
+      refreshOffline();
       setTicketToPrint({
         type: 'cashShift',
         data: {
@@ -1431,7 +1486,13 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+    <div className={`min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans transition-[padding] duration-200 pl-16 ${sidebarOpen ? 'lg:pl-64' : ''}`}>
+      {(!isOnline || pendingSalesCount > 0) && (
+        <div className="bg-amber-500 px-4 py-1.5 text-center text-sm font-semibold text-slate-900">
+          {!isOnline ? 'Sin conexión: las ventas se guardan localmente. ' : 'Sincronizando ventas. '}
+          {pendingSalesCount > 0 && `${pendingSalesCount} venta(s) pendiente(s) de sincronizar.`}
+        </div>
+      )}
       
       {/* Top Navbar */}
       <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 px-3 py-3 shadow-md sm:px-4 lg:gap-4 xl:px-6">
@@ -1449,7 +1510,7 @@ export default function App() {
         </div>
 
         {/* Global Quick Metrics & User Info */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 lg:justify-end lg:gap-3">
+        <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
           <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${
             lowStockCount > 0 
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse' 
@@ -1602,8 +1663,36 @@ export default function App() {
           </div>
         </div>
 
-        {/* View Switcher Tabs */}
-        <nav aria-label="Secciones principales" className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900 p-1">
+        {/* Sidebar */}
+        {sidebarOpen && (
+          <button
+            type="button"
+            aria-label="Cerrar menú"
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          />
+        )}
+        <nav
+          aria-label="Secciones principales"
+          onClick={(event) => {
+            const button = event.target.closest('button');
+            if (button && !button.dataset.menuToggle && window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          className={`fixed inset-y-0 left-0 z-50 flex flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-slate-700 bg-slate-800 p-2 shadow-xl transition-[width] duration-200 [&>button]:w-full ${sidebarOpen ? 'w-64 [&>button]:justify-start [&_span.hidden]:inline' : 'w-16 [&>button]:justify-center [&_span.hidden]:hidden'}`}
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <button
+              type="button"
+              data-menu-toggle
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-label={sidebarOpen ? 'Ocultar menú' : 'Mostrar menú'}
+              aria-expanded={sidebarOpen}
+              className="rounded-xl p-2.5 text-slate-300 transition hover:bg-slate-700 hover:text-white"
+            >
+              <MenuIcon className="h-5 w-5" />
+            </button>
+            {sidebarOpen && <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Menú</span>}
+          </div>
           {canUsePos && (
             <button
               type="button"
@@ -1713,7 +1802,7 @@ export default function App() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
               }`}
             >
-              <Users className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
               <span className="hidden lg:inline">Administración</span>
               {pendingUsersCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
