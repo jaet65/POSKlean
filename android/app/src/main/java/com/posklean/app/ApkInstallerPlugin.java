@@ -52,6 +52,7 @@ public class ApkInstallerPlugin extends Plugin {
     public void downloadAndInstall(PluginCall call) {
         String downloadUrl = call.getString("url");
         String fileName = call.getString("fileName", "POSKlean-update.apk");
+        String token = call.getString("token", "");
 
         if (downloadUrl == null || downloadUrl.isEmpty()) {
             call.reject("URL de descarga no proporcionada");
@@ -68,9 +69,13 @@ public class ApkInstallerPlugin extends Plugin {
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setInstanceFollowRedirects(true);
                 connection.setRequestProperty("User-Agent", "POSKlean-Updater");
+                if (token != null && !token.isEmpty()) {
+                    connection.setRequestProperty("Authorization", "Bearer " + token);
+                    connection.setRequestProperty("Accept", "application/octet-stream");
+                }
                 connection.connect();
 
-                // Manejar posibles redirecciones manuales (ej: releases de GitHub -> S3/objects)
+                // Manejar posibles redirecciones manuales (ej: de api.github.com hacia GitHub Releases S3)
                 int status = connection.getResponseCode();
                 if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == 307 || status == 308) {
                     String redirectUrl = connection.getHeaderField("Location");
@@ -79,6 +84,11 @@ public class ApkInstallerPlugin extends Plugin {
                         url = new URL(redirectUrl);
                         connection = (HttpURLConnection) url.openConnection();
                         connection.setRequestProperty("User-Agent", "POSKlean-Updater");
+                        // Si la redirección es a AWS S3 (pre-firmada por GitHub), NO enviar el header Authorization de GitHub
+                        if (token != null && !token.isEmpty() && redirectUrl.contains("api.github.com")) {
+                            connection.setRequestProperty("Authorization", "Bearer " + token);
+                            connection.setRequestProperty("Accept", "application/octet-stream");
+                        }
                         connection.connect();
                     }
                 }

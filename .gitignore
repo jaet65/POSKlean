@@ -29,4 +29,5 @@ release/
 *.exe
 *.apk
 *.aab
+build/auto-updater-token.json
 

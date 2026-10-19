@@ -458,6 +458,35 @@ ipcMain.handle('app-shutdown-system', () => {
 });
 
 // ==================== AUTO UPDATER ====================
+function getGitHubToken() {
+  if (process.env.VITE_GITHUB_READ_TOKEN) return process.env.VITE_GITHUB_READ_TOKEN;
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  try {
+    const tokenPath = path.join(__dirname, '..', 'build', 'auto-updater-token.json');
+    if (fs.existsSync(tokenPath)) {
+      const data = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
+      if (data && data.token) return data.token;
+    }
+  } catch (err) {
+    console.warn('No se pudo leer auto-updater-token.json:', err.message);
+  }
+  return null;
+}
+
+const updaterToken = getGitHubToken();
+if (updaterToken) {
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'jaet65',
+    repo: 'POSKlean',
+    private: true,
+    token: updaterToken,
+  });
+  autoUpdater.requestHeaders = {
+    Authorization: `Bearer ${updaterToken}`,
+  };
+}
+
 function sendUpdaterStatus(data) {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
     mainWindow.webContents.send('updater-status', data);
@@ -496,23 +525,6 @@ autoUpdater.on('download-progress', (progressObj) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   sendUpdaterStatus({ status: 'downloaded', version: info?.version });
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      buttons: ['Reiniciar y actualizar ahora', 'Instalar al cerrar'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Actualización descargada',
-      message: `La versión ${info?.version || ''} de POSKlean ya está lista para instalar.`,
-      detail: '¿Deseas reiniciar la aplicación ahora para aplicar la nueva versión?',
-    }).then(({ response }) => {
-      if (response === 0) {
-        isQuitting = true;
-        autoUpdater.quitAndInstall(false, true);
-      }
-    }).catch(() => {});
-  }
 });
 
 // Comprobar actualizaciones manualmente

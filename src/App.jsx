@@ -132,11 +132,15 @@ export default function App() {
   };
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [updateState, setUpdateState] = useState(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   useEffect(() => {
     if (window?.posNative?.onUpdateStatus) {
       const unsubscribe = window.posNative.onUpdateStatus((status) => {
         setUpdateState(status);
+        if (status?.status === 'downloaded') {
+          setShowUpdateModal(true);
+        }
       });
       return () => unsubscribe();
     }
@@ -1826,8 +1830,8 @@ export default function App() {
                   return (
                     <span
                       className={`text-xs font-mono px-2 py-0.5 rounded-full border ${isDev
-                          ? 'bg-amber-950/60 text-amber-300 border-amber-600/50'
-                          : 'bg-slate-700 text-cyan-300 border-slate-600'
+                        ? 'bg-amber-950/60 text-amber-300 border-amber-600/50'
+                        : 'bg-slate-700 text-cyan-300 border-slate-600'
                         }`}
                     >
                       {isDev ? `DEV:v${version}` : `v${version}`}
@@ -4014,6 +4018,41 @@ export default function App() {
         onToggleFullScreen={handleToggleFullScreen}
         onShutdownSystem={handleShutdownSystem}
       />
+
+      {showUpdateModal && updateState?.status === 'downloaded' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-6 text-center shadow-2xl space-y-4">
+            <div className="mx-auto w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+              <ArrowDownCircle className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">¡Actualización lista!</h3>
+              <p className="text-xs text-slate-300 mt-1">
+                Se ha descargado la versión <span className="font-mono text-cyan-400 font-semibold">v{updateState.version}</span> de POSKlean.
+              </p>
+              <p className="text-[11px] text-slate-400 mt-2">
+                ¿Deseas reiniciar la aplicación ahora para instalar la nueva versión?
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowUpdateModal(false)}
+                className="flex-1 rounded-xl border border-slate-600 bg-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 transition cursor-pointer"
+              >
+                Más tarde
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerUpdate}
+                className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow-lg shadow-emerald-600/30 cursor-pointer"
+              >
+                Reiniciar y actualizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -18,6 +18,20 @@ if (gitTag.startsWith('v')) {
 
 const appVersion = process.env.APP_VERSION || gitTag || pkg.version || '0.0.1'
 
+// Guardar token de lectura para auto-updates de GitHub en build de producción si existe
+const githubReadToken = process.env.VITE_GITHUB_READ_TOKEN || process.env.GH_TOKEN || ''
+if (githubReadToken) {
+  try {
+    fs.mkdirSync(new URL('./build', import.meta.url), { recursive: true })
+    fs.writeFileSync(
+      new URL('./build/auto-updater-token.json', import.meta.url),
+      JSON.stringify({ token: githubReadToken })
+    )
+  } catch (e) {
+    console.warn('No se pudo guardar auto-updater-token.json:', e.message)
+  }
+}
+
 import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'

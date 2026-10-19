@@ -84,11 +84,13 @@ jobs:
           echo "VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}" >> .env.production
           echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" >> .env.production
           echo "VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}" >> .env.production
+          echo "VITE_GITHUB_READ_TOKEN=${{ secrets.VITE_GITHUB_READ_TOKEN }}" >> .env.production
 
       - name: Build Electron installer
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_GITHUB_READ_TOKEN: ${{ secrets.VITE_GITHUB_READ_TOKEN }}
           VITE_IS_RELEASE: 'true'
           APP_VERSION: ${{ needs.get-version.outputs.version }}
 
@@ -143,11 +145,13 @@ jobs:
           echo "VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}" >> .env.production
           echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" >> .env.production
           echo "VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}" >> .env.production
+          echo "VITE_GITHUB_READ_TOKEN=${{ secrets.VITE_GITHUB_READ_TOKEN }}" >> .env.production
 
       - name: Build web assets
         run: npm run build
         env:
           VITE_IS_RELEASE: 'true'
+          VITE_GITHUB_READ_TOKEN: ${{ secrets.VITE_GITHUB_READ_TOKEN }}
           APP_VERSION: ${{ needs.get-version.outputs.version }}
 
       - name: Sync Capacitor Android

@@ -29,7 +29,8 @@
       {
         "provider": "github",
         "owner": "jaet65",
-        "repo": "POSKlean"
+        "repo": "POSKlean",
+        "private": true
       }
     ],
     "directories": {

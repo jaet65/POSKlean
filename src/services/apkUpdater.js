@@ -33,8 +33,16 @@ export function isVersionHigher(remoteVer, localVer) {
  */
 export async function checkApkUpdate(currentVersion) {
   try {
+    const githubToken = import.meta.env.VITE_GITHUB_READ_TOKEN || '';
+    const headers = {
+      Accept: 'application/vnd.github.v3+json',
+    };
+    if (githubToken) {
+      headers.Authorization = `Bearer ${githubToken}`;
+    }
+
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github.v3+json' },
+      headers,
     });
     if (!res.ok) return { hasUpdate: false };
 
@@ -55,12 +63,14 @@ export async function checkApkUpdate(currentVersion) {
       return { hasUpdate: false, reason: 'No se encontró archivo APK en el release' };
     }
 
+    // En repositorios privados de GitHub, la descarga directa requiere el asset API URL con Authorization o browser_download_url
     return {
       hasUpdate: true,
       currentVersion,
       version: remoteVersion,
       tagName: release.tag_name,
-      apkUrl: apkAsset.browser_download_url,
+      apkUrl: apkAsset.url || apkAsset.browser_download_url,
+      browserDownloadUrl: apkAsset.browser_download_url,
       fileName: apkAsset.name,
       size: apkAsset.size,
       releaseNotes: release.body,
@@ -90,9 +100,11 @@ export async function startApkUpdate(apkUrl, fileName, onProgress) {
   }
 
   try {
+    const githubToken = import.meta.env.VITE_GITHUB_READ_TOKEN || '';
     const result = await ApkInstaller.downloadAndInstall({
       url: apkUrl,
       fileName: fileName || 'POSKlean-update.apk',
+      token: githubToken,
     });
     return result;
   } finally {
