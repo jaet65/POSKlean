@@ -1874,11 +1874,11 @@ export default function App() {
           {/* Global Quick Metrics & User Info */}
           <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
             <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${lowStockCount > 0
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                : 'hidden'
               }`}>
               <AlertTriangle className="w-4 h-4" />
-              <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
+              <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : ''}</span>
             </div>
 
             {isStoreManager && (

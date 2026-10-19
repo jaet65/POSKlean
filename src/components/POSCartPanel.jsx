@@ -51,9 +51,9 @@ export default function POSCartPanel({
         </p>
       )}
 
-      <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex-1 flex flex-col justify-between shadow-md">
-        <div>
-          <div className="flex items-center justify-between pb-3 border-b border-slate-700 mb-3">
+      <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex-1 flex flex-col justify-between shadow-md min-h-0">
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-700 mb-3 shrink-0">
             <h3 className="font-bold text-white text-base flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-cyan-400" />
               Ticket de Venta
@@ -63,7 +63,7 @@ export default function POSCartPanel({
             </span>
           </div>
 
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex items-center justify-between gap-2 shrink-0">
             <p className="text-[11px] uppercase font-semibold text-slate-400">
               Canal de Venta:{' '}
               <span className={selectedChannel ? 'text-cyan-300' : 'text-slate-500'}>
@@ -82,7 +82,7 @@ export default function POSCartPanel({
             )}
           </div>
 
-          <div ref={cartListRef} className="space-y-2 max-h-52 overflow-y-auto pr-1">
+          <div ref={cartListRef} className="space-y-2 flex-1 min-h-36 max-h-[calc(100vh-420px)] lg:max-h-[calc(100vh-380px)] overflow-y-auto pr-1">
             {cart.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-xs">
                 {selectedChannel
@@ -125,7 +125,7 @@ export default function POSCartPanel({
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-700 mt-4">
+        <div className="pt-4 border-t border-slate-700 mt-4 shrink-0">
           <div className="space-y-1.5 mb-4 text-xs">
             <div className="flex justify-between text-slate-400">
               <span>Total Volumen:</span>
@@ -166,11 +166,10 @@ export default function POSCartPanel({
               onClearActionError();
               onOpenPaymentModal();
             }}
-            className={`w-full py-3 rounded-xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${
-              !isGeneralView && cart.length > 0 && !isSavingSale && !loading && isCashShiftOpen
+            className={`w-full py-3 rounded-xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${!isGeneralView && cart.length > 0 && !isSavingSale && !loading && isCashShiftOpen
                 ? 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-cyan-500/25'
                 : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-            }`}
+              }`}
           >
             <DollarSign className="w-4 h-4" />
             {isSavingSale ? 'Procesando...' : `Registrar Cobro (${formatCurrency(cartTotal)})`}
