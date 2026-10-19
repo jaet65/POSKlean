@@ -1804,136 +1804,434 @@ export default function App() {
   return (
     <>
       <div className={`app-main-layout min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans transition-[padding] duration-200 pl-16 ${sidebarOpen ? 'lg:pl-64' : ''}`}>
-      {(!isOnline || pendingSalesCount > 0) && (
-        <div className="bg-amber-500 px-4 py-1.5 text-center text-sm font-semibold text-slate-900">
-          {!isOnline ? 'Sin conexión: las ventas se guardan localmente. ' : 'Sincronizando ventas. '}
-          {pendingSalesCount > 0 && `${pendingSalesCount} venta(s) pendiente(s) de sincronizar.`}
-        </div>
-      )}
-
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 px-3 py-3 shadow-md sm:px-4 lg:gap-4 xl:px-6">
-        <div className="flex shrink-0 items-center space-x-3">
-          <div className="bg-linear-to-r from-cyan-500 to-blue-600 p-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
-            <Droplet className="w-6 h-6 text-white" />
+        {(!isOnline || pendingSalesCount > 0) && (
+          <div className="bg-amber-500 px-4 py-1.5 text-center text-sm font-semibold text-slate-900">
+            {!isOnline ? 'Sin conexión: las ventas se guardan localmente. ' : 'Sincronizando ventas. '}
+            {pendingSalesCount > 0 && `${pendingSalesCount} venta(s) pendiente(s) de sincronizar.`}
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              POS<span className="text-cyan-400">Klean</span>
-              {(() => {
-                const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.1';
-                const isDev = typeof __IS_DEV__ !== 'undefined' ? __IS_DEV__ : import.meta.env.DEV;
-                return (
-                  <span
-                    className={`text-xs font-mono px-2 py-0.5 rounded-full border ${
-                      isDev
-                        ? 'bg-amber-950/60 text-amber-300 border-amber-600/50'
-                        : 'bg-slate-700 text-cyan-300 border-slate-600'
-                    }`}
-                  >
-                    {isDev ? `DEV:v${version}` : `v${version}`}
-                  </span>
-                );
-              })()}
-              {updateState?.status === 'downloading' && (
-                <span className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 animate-pulse">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  Descargando v{updateState.version || ''} ({updateState.percent || 0}%)
-                </span>
-              )}
-              {(updateState?.status === 'downloaded' || (updateState?.platform === 'android' && updateState?.status === 'available')) && (
-                <button
-                  type="button"
-                  onClick={handleTriggerUpdate}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition animate-bounce cursor-pointer"
-                  title="Haz clic para descargar e instalar la nueva versión"
-                >
-                  <ArrowDownCircle className="w-3.5 h-3.5" />
-                  Actualizar a v{updateState.version}
-                </button>
-              )}
-            </h1>
-          </div>
-        </div>
+        )}
 
-        {/* Global Quick Metrics & User Info */}
-        <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
-          <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${lowStockCount > 0
-            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
-            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-            }`}>
-            <AlertTriangle className="w-4 h-4" />
-            <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
-          </div>
-
-          {isStoreManager && (
-            <label className="flex h-11 items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl text-xs">
-              <Store className="w-4 h-4 text-cyan-400" />
-              <select
-                aria-label="Tienda activa"
-                value={selectedStoreId || ''}
-                onChange={(event) => handleStoreChange(event.target.value)}
-                className="max-w-40 bg-transparent text-slate-200 font-semibold focus:outline-none"
-              >
-                <option value="" className="bg-slate-800">General</option>
-                {activeStores.map((store) => (
-                  <option key={store.id} value={store.id} className="bg-slate-800">
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {currentUser.role === 'cajero' && (
-            <div
-              aria-label={`Tienda activa: ${storeNameById.get(activeStoreId) || activeStoreId}`}
-              className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs"
-            >
-              <Store className="h-4 w-4 shrink-0 text-cyan-400" />
-              <span className="text-slate-400">Tienda activa:</span>
-              <strong className="max-w-40 truncate text-slate-200">
-                {storeNameById.get(activeStoreId) || activeStoreId}
-              </strong>
+        {/* Top Navbar */}
+        <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 px-3 py-3 shadow-md sm:px-4 lg:gap-4 xl:px-6">
+          <div className="flex shrink-0 items-center space-x-3">
+            <div className="bg-linear-to-r from-cyan-500 to-blue-600 p-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
+              <Droplet className="w-6 h-6 text-white" />
             </div>
-          )}
-
-          {activeStoreId && (
-            <div className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs">
-              <DollarSign className="h-4 w-4 shrink-0 text-cyan-400" />
-              {cashShiftLoading ? (
-                <span className="text-slate-400">Consultando turno...</span>
-              ) : cashShiftError ? (
-                <span role="alert" className="max-w-56 truncate text-rose-300" title={cashShiftError}>{cashShiftError}</span>
-              ) : cashShiftStoreMismatch ? (
-                <span
-                  className="max-w-56 truncate text-amber-300"
-                  title="Cierra ese turno en su tienda antes de cambiar."
-                >
-                  Turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}
-                </span>
-              ) : isCashShiftOpen ? (
-                <>
-                  <span className="font-semibold text-emerald-300">Turno abierto</span>
-                  <span className="hidden text-slate-400 xl:inline">
-                    Fondo {formatCurrency(cashShift.openingCashCents / 100)} · Esperado {formatCurrency(currentShiftExpectedCash)}
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                POS<span className="text-cyan-400">Klean</span>
+                {(() => {
+                  const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.1';
+                  const isDev = typeof __IS_DEV__ !== 'undefined' ? __IS_DEV__ : import.meta.env.DEV;
+                  return (
+                    <span
+                      className={`text-xs font-mono px-2 py-0.5 rounded-full border ${isDev
+                          ? 'bg-amber-950/60 text-amber-300 border-amber-600/50'
+                          : 'bg-slate-700 text-cyan-300 border-slate-600'
+                        }`}
+                    >
+                      {isDev ? `DEV:v${version}` : `v${version}`}
+                    </span>
+                  );
+                })()}
+                {updateState?.status === 'available' && !updateState?.platform && (
+                  <span className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    Nueva versión v{updateState.version || ''} detectada...
                   </span>
+                )}
+                {updateState?.status === 'downloading' && (
+                  <span className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    Descargando v{updateState.version || ''} ({updateState.percent || 0}%)
+                  </span>
+                )}
+                {updateState?.status === 'error' && (
+                  <span
+                    className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-500/40"
+                    title={updateState.message || 'Error al comprobar actualización'}
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Error actualización
+                  </span>
+                )}
+                {(updateState?.status === 'downloaded' || (updateState?.platform === 'android' && updateState?.status === 'available')) && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setCountedCashDraft('');
-                      setCashShiftActionError('');
-                      setCashShiftModal('close');
-                    }}
-                    disabled={cart.length > 0 || isSavingCashShift}
-                    title={cart.length > 0 ? 'Vacía el carrito antes de cerrar el turno.' : undefined}
-                    className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={handleTriggerUpdate}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition animate-bounce cursor-pointer"
+                    title="Haz clic para descargar e instalar la nueva versión"
                   >
-                    Cerrar caja
+                    <ArrowDownCircle className="w-3.5 h-3.5" />
+                    Actualizar {updateState?.version ? `a v${updateState.version}` : ''}
                   </button>
+                )}
+              </h1>
+            </div>
+          </div>
+
+          {/* Global Quick Metrics & User Info */}
+          <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
+            <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${lowStockCount > 0
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              }`}>
+              <AlertTriangle className="w-4 h-4" />
+              <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : 'Stock Saludable'}</span>
+            </div>
+
+            {isStoreManager && (
+              <label className="flex h-11 items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl text-xs">
+                <Store className="w-4 h-4 text-cyan-400" />
+                <select
+                  aria-label="Tienda activa"
+                  value={selectedStoreId || ''}
+                  onChange={(event) => handleStoreChange(event.target.value)}
+                  className="max-w-40 bg-transparent text-slate-200 font-semibold focus:outline-none"
+                >
+                  <option value="" className="bg-slate-800">General</option>
+                  {activeStores.map((store) => (
+                    <option key={store.id} value={store.id} className="bg-slate-800">
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {currentUser.role === 'cajero' && (
+              <div
+                aria-label={`Tienda activa: ${storeNameById.get(activeStoreId) || activeStoreId}`}
+                className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs"
+              >
+                <Store className="h-4 w-4 shrink-0 text-cyan-400" />
+                <span className="text-slate-400">Tienda activa:</span>
+                <strong className="max-w-40 truncate text-slate-200">
+                  {storeNameById.get(activeStoreId) || activeStoreId}
+                </strong>
+              </div>
+            )}
+
+            {activeStoreId && (
+              <div className="flex h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 text-xs">
+                <DollarSign className="h-4 w-4 shrink-0 text-cyan-400" />
+                {cashShiftLoading ? (
+                  <span className="text-slate-400">Consultando turno...</span>
+                ) : cashShiftError ? (
+                  <span role="alert" className="max-w-56 truncate text-rose-300" title={cashShiftError}>{cashShiftError}</span>
+                ) : cashShiftStoreMismatch ? (
+                  <span
+                    className="max-w-56 truncate text-amber-300"
+                    title="Cierra ese turno en su tienda antes de cambiar."
+                  >
+                    Turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}
+                  </span>
+                ) : isCashShiftOpen ? (
+                  <>
+                    <span className="font-semibold text-emerald-300">Turno abierto</span>
+                    <span className="hidden text-slate-400 xl:inline">
+                      Fondo {formatCurrency(cashShift.openingCashCents / 100)} · Esperado {formatCurrency(currentShiftExpectedCash)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCountedCashDraft('');
+                        setCashShiftActionError('');
+                        setCashShiftModal('close');
+                      }}
+                      disabled={cart.length > 0 || isSavingCashShift}
+                      title={cart.length > 0 ? 'Vacía el carrito antes de cerrar el turno.' : undefined}
+                      className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Cerrar caja
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-amber-300">Sin turno abierto</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpeningCashDraft('0');
+                        setCashShiftActionError('');
+                        setCashShiftModal('open');
+                      }}
+                      disabled={isSavingCashShift}
+                      className="rounded-lg bg-cyan-500 px-2 py-1 font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Abrir turno
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {canAccessInventory && lowStockCount > 0 && (
+              <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold">Alerta: stock mínimo alcanzado</p>
+                  <p className="mt-1 text-[10px] text-amber-100/80">
+                    {lowStockProducts.slice(0, 3).map((product) =>
+                      `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
+                    ).join(' · ')}
+                    {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('inventory')}
+                  className="shrink-0 rounded-lg border border-amber-500/40 px-2 py-1 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-500/15"
+                >
+                  Ver inventario
+                </button>
+              </div>
+            )}
+
+            {/* User Profile Badge */}
+            <div className="ml-auto flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 lg:ml-0">
+              {currentUser.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName}
+                  className="w-7 h-7 rounded-full border border-slate-600 object-cover"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs border border-cyan-500/30">
+                  {(currentUser.displayName || currentUser.username || currentUser.email || 'U')[0].toUpperCase()}
+                </div>
+              )}
+              <div className="hidden sm:block text-left pr-1">
+                <p className="text-xs font-semibold text-slate-200 leading-tight truncate max-w-32.5">
+                  {currentUser.displayName || currentUser.username || (currentUser.email ? currentUser.email.split('@')[0] : 'Usuario')}
+                </p>
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md ${currentUser.role === 'admin' ? 'bg-purple-500/20 text-purple-300' :
+                  currentUser.role === 'supervisor' ? 'bg-blue-500/20 text-blue-300' :
+                    'bg-emerald-500/20 text-emerald-300'
+                  }`}>
+                  {currentUser.role === 'admin' ? 'Admin' : currentUser.role}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Cerrar Sesión"
+                className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg transition hover:bg-slate-800 cursor-pointer ml-0.5"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isElectron && (
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(true)}
+                title="Apagar / Salir"
+                className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-100 cursor-pointer shadow-sm"
+              >
+                <Power className="h-4 w-4 text-rose-400" />
+                <span className="hidden sm:inline">Apagar</span>
+              </button>
+            )}
+          </div>
+
+          {/* Sidebar */}
+          {sidebarOpen && (
+            <button
+              type="button"
+              aria-label="Cerrar menú"
+              onClick={() => setSidebarOpen(false)}
+              className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+            />
+          )}
+          <nav
+            aria-label="Secciones principales"
+            onClick={(event) => {
+              const button = event.target.closest('button');
+              if (button && !button.dataset.menuToggle && window.innerWidth < 1024) setSidebarOpen(false);
+            }}
+            className={`fixed inset-y-0 left-0 z-50 flex flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-slate-700 bg-slate-800 p-2 shadow-xl transition-[width] duration-200 [&>button]:w-full ${sidebarOpen ? 'w-64 [&>button]:justify-start [&_span.hidden]:inline' : 'w-16 [&>button]:justify-center [&_span.hidden]:hidden'}`}
+          >
+            <div className="mb-2 flex items-center gap-2">
+              <button
+                type="button"
+                data-menu-toggle
+                onClick={() => setSidebarOpen((open) => !open)}
+                aria-label={sidebarOpen ? 'Ocultar menú' : 'Mostrar menú'}
+                aria-expanded={sidebarOpen}
+                className="rounded-xl p-2.5 text-slate-300 transition hover:bg-slate-700 hover:text-white"
+              >
+                <MenuIcon className="h-5 w-5" />
+              </button>
+              {sidebarOpen && <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Menú</span>}
+            </div>
+            {canUsePos && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('pos')}
+                aria-label="Punto de Venta"
+                title="Punto de Venta"
+                className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'pos'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span className="hidden lg:inline">Punto de Venta</span>
+              </button>
+            )}
+
+            {canAccessInventory && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('inventory')}
+                aria-label="Inventario"
+                title="Inventario"
+                className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'inventory'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <Package className="w-4 h-4" />
+                <span className="hidden lg:inline">Inventario</span>
+                {lowStockCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900">
+                    {lowStockCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {canAccessPurchases && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('purchases')}
+                aria-label={pendingPurchaseRequestsCount > 0
+                  ? `Compras, ${pendingPurchaseRequestsCount} solicitudes pendientes`
+                  : 'Compras'}
+                title="Compras"
+                className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'purchases'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <Truck className="w-4 h-4" />
+                <span className="hidden lg:inline">Compras</span>
+                {isStoreManager && pendingPurchaseRequestsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-5 rounded-full border border-slate-900 bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
+                    {pendingPurchaseRequestsCount > 99 ? '99+' : pendingPurchaseRequestsCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {canAccessCatalog && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('catalog')}
+                aria-label="Catálogo"
+                title="Catálogo"
+                className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'catalog'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span className="hidden lg:inline">Catálogo</span>
+              </button>
+            )}
+
+            {canAccessSales && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('sales')}
+                aria-label="Ventas y Reportes"
+                title="Ventas y Reportes"
+                className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'sales'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span className="hidden lg:inline">Ventas / Reporte</span>
+              </button>
+            )}
+
+            {canAccessUsers && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                aria-label="Administración"
+                title="Administración"
+                className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'users'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden lg:inline">Administración</span>
+                {pendingUsersCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
+                    {pendingUsersCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {isElectron && (
+              <div className="mt-auto pt-2 border-t border-slate-700/80">
+                <button
+                  type="button"
+                  onClick={() => setShowExitConfirmModal(true)}
+                  aria-label="Apagar / Salir"
+                  title="Apagar / Salir"
+                  className={`flex-none flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 text-rose-400 hover:text-rose-200 hover:bg-rose-500/10 cursor-pointer w-full gap-2 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
+                >
+                  <Power className="w-4 h-4 shrink-0" />
+                  <span className="hidden lg:inline text-xs font-semibold">Apagar / Salir</span>
+                </button>
+              </div>
+            )}
+          </nav>
+        </header>
+
+        {/* Main Content Area */}
+        {(dataError || actionError) && (
+          <div role="alert" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5">
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {dataError || actionError}
+            </div>
+          </div>
+        )}
+        {loading && (
+          <div role="status" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5 text-sm text-slate-400">
+            Conectando con Firestore...
+          </div>
+        )}
+
+        <main className="mx-auto w-full max-w-screen-2xl flex-1 p-3 sm:p-5 xl:p-6">
+          {/* TAB 1: PUNTO DE VENTA (POS) */}
+          {visibleTab === 'pos' && canUsePos && activeStoreId && !isCashShiftOpen && (
+            <section className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-8 text-center shadow-md">
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-400">
+                <DollarSign className="h-8 w-8" />
+              </div>
+              {cashShiftLoading ? (
+                <p className="text-sm text-slate-400">Consultando turno...</p>
+              ) : cashShiftError ? (
+                <p role="alert" className="text-sm text-rose-300">{cashShiftError}</p>
+              ) : cashShiftStoreMismatch ? (
+                <>
+                  <h2 className="text-lg font-bold text-white">Turno abierto en otra tienda</h2>
+                  <p className="text-sm text-amber-300">
+                    Tienes un turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}. Vuelve a esa tienda y ciérralo antes de cambiar.
+                  </p>
                 </>
               ) : (
                 <>
-                  <span className="text-amber-300">Sin turno abierto</span>
+                  <h2 className="text-lg font-bold text-white">Abre un turno para vender</h2>
+                  <p className="text-sm text-slate-400">
+                    Registra el fondo de caja inicial para habilitar el punto de venta.
+                  </p>
                   <button
                     type="button"
                     onClick={() => {
@@ -1942,2048 +2240,1764 @@ export default function App() {
                       setCashShiftModal('open');
                     }}
                     disabled={isSavingCashShift}
-                    className="rounded-lg bg-cyan-500 px-2 py-1 font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Abrir turno
                   </button>
                 </>
               )}
-            </div>
+            </section>
           )}
+          {visibleTab === 'pos' && canUsePos && !(activeStoreId && !isCashShiftOpen) && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
 
-          {canAccessInventory && lowStockCount > 0 && (
-            <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-200">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-              <div className="min-w-0">
-                <p className="text-xs font-bold">Alerta: stock mínimo alcanzado</p>
-                <p className="mt-1 text-[10px] text-amber-100/80">
-                  {lowStockProducts.slice(0, 3).map((product) =>
-                    `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
-                  ).join(' · ')}
-                  {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab('inventory')}
-                className="shrink-0 rounded-lg border border-amber-500/40 px-2 py-1 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-500/15"
-              >
-                Ver inventario
-              </button>
-            </div>
-          )}
-
-          {/* User Profile Badge */}
-          <div className="ml-auto flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2.5 lg:ml-0">
-            {currentUser.photoURL ? (
-              <img
-                src={currentUser.photoURL}
-                alt={currentUser.displayName}
-                className="w-7 h-7 rounded-full border border-slate-600 object-cover"
+              <POSCatalog
+                availableCategories={availableCategories}
+                cart={cart}
+                filteredProducts={filteredProducts}
+                isCashShiftOpen={isCashShiftOpen}
+                isGeneralView={isGeneralView}
+                onCategoryChange={setSelectedCategory}
+                onProductSelect={handleSelectProductToCart}
+                onSearchChange={setSearchTerm}
+                searchTerm={searchTerm}
+                selectedCategory={selectedCategory}
               />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs border border-cyan-500/30">
-                {(currentUser.displayName || currentUser.username || currentUser.email || 'U')[0].toUpperCase()}
-              </div>
-            )}
-            <div className="hidden sm:block text-left pr-1">
-              <p className="text-xs font-semibold text-slate-200 leading-tight truncate max-w-32.5">
-                {currentUser.displayName || currentUser.username || (currentUser.email ? currentUser.email.split('@')[0] : 'Usuario')}
-              </p>
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md ${currentUser.role === 'admin' ? 'bg-purple-500/20 text-purple-300' :
-                currentUser.role === 'supervisor' ? 'bg-blue-500/20 text-blue-300' :
-                  'bg-emerald-500/20 text-emerald-300'
-                }`}>
-                {currentUser.role === 'admin' ? 'Admin' : currentUser.role}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="Cerrar Sesión"
-              className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg transition hover:bg-slate-800 cursor-pointer ml-0.5"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
 
-          {isElectron && (
-            <button
-              type="button"
-              onClick={() => setShowExitConfirmModal(true)}
-              title="Apagar / Salir"
-              className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-100 cursor-pointer shadow-sm"
-            >
-              <Power className="h-4 w-4 text-rose-400" />
-              <span className="hidden sm:inline">Apagar</span>
-            </button>
-          )}
-        </div>
+              <POSCartPanel
+                cart={cart}
+                cartQuantityDrafts={cartQuantityDrafts}
+                cartTotal={cartTotal}
+                cartVolume={cartVolume}
+                cashShiftActionError={cashShiftActionError}
+                cashShiftModal={cashShiftModal}
+                hasSingleChannel={hasSingleChannel}
+                isCashShiftOpen={isCashShiftOpen}
+                isGeneralView={isGeneralView}
+                isSavingSale={isSavingSale}
+                lastCartTouch={lastCartTouch}
+                lastCompletedSale={lastCompletedSale}
+                loading={loading}
+                onCartQuantityBlur={handleCartQuantityBlur}
+                onCartQuantityChange={handleCartQuantityChange}
+                onClearActionError={() => setActionError('')}
+                onOpenChannelModal={() => setShowChannelModal(true)}
+                onOpenPaymentModal={() => setShowPaymentModal(true)}
+                onPrintLastTicket={() => setTicketToPrint({ type: 'sale', data: lastCompletedSale })}
+                onRemoveFromCart={handleRemoveFromCart}
+                products={products}
+                selectedChannel={selectedChannel}
+                showCheckoutSuccess={showCheckoutSuccess}
+              />
 
-        {/* Sidebar */}
-        {sidebarOpen && (
-          <button
-            type="button"
-            aria-label="Cerrar menú"
-            onClick={() => setSidebarOpen(false)}
-            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
-          />
-        )}
-        <nav
-          aria-label="Secciones principales"
-          onClick={(event) => {
-            const button = event.target.closest('button');
-            if (button && !button.dataset.menuToggle && window.innerWidth < 1024) setSidebarOpen(false);
-          }}
-          className={`fixed inset-y-0 left-0 z-50 flex flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-slate-700 bg-slate-800 p-2 shadow-xl transition-[width] duration-200 [&>button]:w-full ${sidebarOpen ? 'w-64 [&>button]:justify-start [&_span.hidden]:inline' : 'w-16 [&>button]:justify-center [&_span.hidden]:hidden'}`}
-        >
-          <div className="mb-2 flex items-center gap-2">
-            <button
-              type="button"
-              data-menu-toggle
-              onClick={() => setSidebarOpen((open) => !open)}
-              aria-label={sidebarOpen ? 'Ocultar menú' : 'Mostrar menú'}
-              aria-expanded={sidebarOpen}
-              className="rounded-xl p-2.5 text-slate-300 transition hover:bg-slate-700 hover:text-white"
-            >
-              <MenuIcon className="h-5 w-5" />
-            </button>
-            {sidebarOpen && <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Menú</span>}
-          </div>
-          {canUsePos && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('pos')}
-              aria-label="Punto de Venta"
-              title="Punto de Venta"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'pos'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <ShoppingCart className="w-4 h-4" />
-              <span className="hidden lg:inline">Punto de Venta</span>
-            </button>
-          )}
-
-          {canAccessInventory && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('inventory')}
-              aria-label="Inventario"
-              title="Inventario"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'inventory'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <Package className="w-4 h-4" />
-              <span className="hidden lg:inline">Inventario</span>
-              {lowStockCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900">
-                  {lowStockCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {canAccessPurchases && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('purchases')}
-              aria-label={pendingPurchaseRequestsCount > 0
-                ? `Compras, ${pendingPurchaseRequestsCount} solicitudes pendientes`
-                : 'Compras'}
-              title="Compras"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'purchases'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <Truck className="w-4 h-4" />
-              <span className="hidden lg:inline">Compras</span>
-              {isStoreManager && pendingPurchaseRequestsCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 rounded-full border border-slate-900 bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
-                  {pendingPurchaseRequestsCount > 99 ? '99+' : pendingPurchaseRequestsCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {canAccessCatalog && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('catalog')}
-              aria-label="Catálogo"
-              title="Catálogo"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'catalog'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <Layers className="w-4 h-4" />
-              <span className="hidden lg:inline">Catálogo</span>
-            </button>
-          )}
-
-          {canAccessSales && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('sales')}
-              aria-label="Ventas y Reportes"
-              title="Ventas y Reportes"
-              className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'sales'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span className="hidden lg:inline">Ventas / Reporte</span>
-            </button>
-          )}
-
-          {canAccessUsers && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('users')}
-              aria-label="Administración"
-              title="Administración"
-              className={`relative flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'users'
-                ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-            >
-              <Settings className="w-4 h-4" />
-              <span className="hidden lg:inline">Administración</span>
-              {pendingUsersCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-900 animate-pulse">
-                  {pendingUsersCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {isElectron && (
-            <div className="mt-auto pt-2 border-t border-slate-700/80">
-              <button
-                type="button"
-                onClick={() => setShowExitConfirmModal(true)}
-                aria-label="Apagar / Salir"
-                title="Apagar / Salir"
-                className={`flex-none flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 text-rose-400 hover:text-rose-200 hover:bg-rose-500/10 cursor-pointer w-full gap-2 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
-              >
-                <Power className="w-4 h-4 shrink-0" />
-                <span className="hidden lg:inline text-xs font-semibold">Apagar / Salir</span>
-              </button>
             </div>
           )}
-        </nav>
-      </header>
 
-      {/* Main Content Area */}
-      {(dataError || actionError) && (
-        <div role="alert" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5">
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {dataError || actionError}
-          </div>
-        </div>
-      )}
-      {loading && (
-        <div role="status" className="mx-auto mt-3 w-full max-w-screen-2xl px-3 sm:px-5 text-sm text-slate-400">
-          Conectando con Firestore...
-        </div>
-      )}
-
-      <main className="mx-auto w-full max-w-screen-2xl flex-1 p-3 sm:p-5 xl:p-6">
-        {/* TAB 1: PUNTO DE VENTA (POS) */}
-        {visibleTab === 'pos' && canUsePos && activeStoreId && !isCashShiftOpen && (
-          <section className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-8 text-center shadow-md">
-            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-400">
-              <DollarSign className="h-8 w-8" />
-            </div>
-            {cashShiftLoading ? (
-              <p className="text-sm text-slate-400">Consultando turno...</p>
-            ) : cashShiftError ? (
-              <p role="alert" className="text-sm text-rose-300">{cashShiftError}</p>
-            ) : cashShiftStoreMismatch ? (
-              <>
-                <h2 className="text-lg font-bold text-white">Turno abierto en otra tienda</h2>
-                <p className="text-sm text-amber-300">
-                  Tienes un turno abierto en {storeNameById.get(cashShift.storeId) || cashShift.storeId}. Vuelve a esa tienda y ciérralo antes de cambiar.
-                </p>
-              </>
-            ) : (
-              <>
-                <h2 className="text-lg font-bold text-white">Abre un turno para vender</h2>
-                <p className="text-sm text-slate-400">
-                  Registra el fondo de caja inicial para habilitar el punto de venta.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpeningCashDraft('0');
-                    setCashShiftActionError('');
-                    setCashShiftModal('open');
-                  }}
-                  disabled={isSavingCashShift}
-                  className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Abrir turno
-                </button>
-              </>
-            )}
-          </section>
-        )}
-        {visibleTab === 'pos' && canUsePos && !(activeStoreId && !isCashShiftOpen) && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
-
-            <POSCatalog
-              availableCategories={availableCategories}
-              cart={cart}
-              filteredProducts={filteredProducts}
-              isCashShiftOpen={isCashShiftOpen}
-              isGeneralView={isGeneralView}
-              onCategoryChange={setSelectedCategory}
-              onProductSelect={handleSelectProductToCart}
-              onSearchChange={setSearchTerm}
-              searchTerm={searchTerm}
-              selectedCategory={selectedCategory}
-            />
-
-            <POSCartPanel
-              cart={cart}
-              cartQuantityDrafts={cartQuantityDrafts}
-              cartTotal={cartTotal}
-              cartVolume={cartVolume}
-              cashShiftActionError={cashShiftActionError}
-              cashShiftModal={cashShiftModal}
-              hasSingleChannel={hasSingleChannel}
-              isCashShiftOpen={isCashShiftOpen}
-              isGeneralView={isGeneralView}
-              isSavingSale={isSavingSale}
-              lastCartTouch={lastCartTouch}
-              lastCompletedSale={lastCompletedSale}
-              loading={loading}
-              onCartQuantityBlur={handleCartQuantityBlur}
-              onCartQuantityChange={handleCartQuantityChange}
-              onClearActionError={() => setActionError('')}
-              onOpenChannelModal={() => setShowChannelModal(true)}
-              onOpenPaymentModal={() => setShowPaymentModal(true)}
-              onPrintLastTicket={() => setTicketToPrint({ type: 'sale', data: lastCompletedSale })}
-              onRemoveFromCart={handleRemoveFromCart}
+          {visibleTab === 'purchases' && canAccessPurchases && (
+            <PurchasingPanel
+              currentUser={currentUser}
+              activeStoreId={activeStoreId}
+              stores={activeStores}
               products={products}
-              selectedChannel={selectedChannel}
-              showCheckoutSuccess={showCheckoutSuccess}
+              catalog={catalog}
+              onPrintOrder={(order, hideCosts) => setTicketToPrint({
+                type: 'purchaseOrder',
+                data: { ...order, hideCosts },
+              })}
             />
+          )}
 
-          </div>
-        )}
-
-        {visibleTab === 'purchases' && canAccessPurchases && (
-          <PurchasingPanel
-            currentUser={currentUser}
-            activeStoreId={activeStoreId}
-            stores={activeStores}
-            products={products}
-            catalog={catalog}
-            onPrintOrder={(order, hideCosts) => setTicketToPrint({
-              type: 'purchaseOrder',
-              data: { ...order, hideCosts },
-            })}
-          />
-        )}
-
-        {visibleTab === 'catalog' && canAccessCatalog && (
-          <CatalogPanel
-            currentUser={currentUser}
-            catalog={catalog}
-            products={products}
-            stores={activeStores}
-            activeStoreId={activeStoreId}
-          />
-        )}
-
-        {/* TAB 2: INVENTARIO & RESURTIDO */}
-        {visibleTab === 'inventory' && canAccessInventory && (
-          <div className="space-y-5">
-            {addProductSuccess && (
-              <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span>{addProductSuccess}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAddProductSuccess('')}
-                  className="text-emerald-400 hover:text-white text-sm"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {/* Header Metrics */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {currentUser.role !== 'cajero' && (
-                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                  <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
-                    <Layers className="w-6 h-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
-                    <p className="text-sm font-bold text-orange-400 font-mono">Compra: {formatCurrency(inventoryValueAtCost)} MXN</p>
-                    <p className="text-sm font-bold text-emerald-400 font-mono">Venta: {formatCurrency(inventoryValueAtSalePrice)} MXN</p>
-                    <p className="text-sm font-bold text-purple-400 font-mono">
-                      Ganancia: {formatCurrency(inventoryValueAtSalePrice - inventoryValueAtCost)} MXN
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {lowStockCount > 0 && (
-                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                  <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 font-medium">Productos por Resurtir</p>
-                    <p className="text-2xl font-bold text-amber-400 font-mono">{lowStockCount}</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                  <Package className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Total de SKU / Productos</p>
-                  <p className="text-2xl font-bold text-white font-mono">{products.length}</p>
-                </div>
-              </div>
-            </div>
-
-            <InventoryTable
-              activeStoreCount={activeStores.length}
-              deletingProductId={deletingProductId}
-              editingMinStockProductId={editingMinStockProductId}
-              editingPriceProductId={editingPriceProductId}
-              inventoryTableProducts={inventoryTableProducts}
-              isAdmin={isAdmin}
-              isCajero={isCajero}
-              isGeneralView={isGeneralView}
-              isSavingMinStock={isSavingMinStock}
-              isSavingPrice={isSavingPrice}
-              isStoreManager={isStoreManager}
-              minStockDraft={minStockDraft}
-              onCancelMinStock={() => setEditingMinStockProductId(null)}
-              onCancelPrice={() => setEditingPriceProductId(null)}
-              onDeleteProduct={handleDeleteProduct}
-              onEditMinStock={(product) => {
-                setEditingMinStockProductId(product.id);
-                setMinStockDraft(String(product.minStock));
-              }}
-              onEditPrice={(product) => {
-                setEditingPriceProductId(product.id);
-                setPriceDraft(String(product.price));
-              }}
-              onGoToCatalog={() => setActiveTab('catalog')}
-              onMinStockDraftChange={setMinStockDraft}
-              onOpenHistory={() => setIsInventoryHistoryOpen(true)}
-              onOpenInventoryAudit={handleOpenInventoryAudit}
-              onOpenRestock={handleOpenRestock}
-              onOpenTransfer={handleOpenTransfer}
-              onPriceDraftChange={setPriceDraft}
-              onSaveMinStock={handleSaveMinStock}
-              onSavePrice={handleSavePrice}
-              priceDraft={priceDraft}
+          {visibleTab === 'catalog' && canAccessCatalog && (
+            <CatalogPanel
+              currentUser={currentUser}
+              catalog={catalog}
               products={products}
-              storeNameById={storeNameById}
+              stores={activeStores}
+              activeStoreId={activeStoreId}
             />
+          )}
 
-            {isInventoryHistoryOpen && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
-                  <div className="flex justify-between items-center border-b border-slate-700 p-5">
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <History className="w-5 h-5 text-cyan-400" />
-                      Historial de inventario
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setIsInventoryHistoryOpen(false)}
-                      aria-label="Cerrar historial"
-                      className="text-slate-400 hover:text-white p-1 cursor-pointer"
-                    >
-                      ✕
-                    </button>
+          {/* TAB 2: INVENTARIO & RESURTIDO */}
+          {visibleTab === 'inventory' && canAccessInventory && (
+            <div className="space-y-5">
+              {addProductSuccess && (
+                <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <span>{addProductSuccess}</span>
                   </div>
-                  <div className="overflow-y-auto p-5 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <label htmlFor="inventory-movement-filter" className="text-xs font-medium text-slate-300">
-                        Tipo de movimiento
-                      </label>
-                      <select
-                        id="inventory-movement-filter"
-                        value={movementTypeFilter}
-                        onChange={(event) => setMovementTypeFilter(event.target.value)}
-                        className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
-                      >
-                        <option value="all">Todos</option>
-                        <option value="initial">Alta de producto</option>
-                        <option value="restock">Resurtido</option>
-                        <option value="purchase">Compra a proveedor</option>
-                        <option value="sale">Venta</option>
-                        <option value="audit">Auditoría</option>
-                        <option value="transfer_out">Transferencia enviada</option>
-                        <option value="transfer_in">Transferencia recibida</option>
-                      </select>
+                  <button
+                    type="button"
+                    onClick={() => setAddProductSuccess('')}
+                    className="text-emerald-400 hover:text-white text-sm"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Header Metrics */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {currentUser.role !== 'cajero' && (
+                  <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                    <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+                      <Layers className="w-6 h-6" />
                     </div>
-                    {movements.length === 0 ? (
-                      <p className="text-sm text-slate-400 text-center py-10">Aún no hay movimientos registrados.</p>
-                    ) : filteredMovements.length === 0 ? (
-                      <p className="text-sm text-slate-400 text-center py-10">No hay movimientos de este tipo.</p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-162.5 text-left text-xs text-slate-300">
-                          <thead className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
-                            <tr>
-                              <th className="px-3 py-3">Fecha</th>
-                              <th className="px-3 py-3">Movimiento</th>
-                              <th className="px-3 py-3">Producto</th>
-                              <th className="px-3 py-3">Cantidad</th>
-                              <th className="px-3 py-3">Responsable</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-700/60">
-                            {filteredMovements.map((movement) => {
-                              const counterpartName = storeNameById.get(movement.counterpartStoreId) || 'otra tienda';
-                              const movementLabel = movement.type === 'transfer_out'
-                                ? `Transferencia a ${counterpartName}`
-                                : movement.type === 'transfer_in'
-                                  ? `Transferencia de ${counterpartName}`
-                                  : movement.type === 'restock'
-                                    ? 'Resurtido'
-                                    : movement.type === 'purchase'
-                                      ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
-                                      : movement.type === 'sale'
-                                        ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
-                                        : movement.type === 'audit'
-                                          ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`
-                                          : 'Producto creado';
-                              const quantity = Math.abs(movement.amount || 0);
-                              return (
-                                <tr key={movement.id} className="hover:bg-slate-700/30">
-                                  <td className="px-3 py-3 whitespace-nowrap">{movement.timestamp}</td>
-                                  <td className="px-3 py-3 font-semibold text-slate-100">{movementLabel}</td>
-                                  <td className="px-3 py-3">{movement.productName || 'Producto'}</td>
-                                  <td className="px-3 py-3 font-mono">
-                                    {movement.type === 'audit'
-                                      ? movement.difference === 0
-                                        ? `Sin diferencia (${movement.countedStock} ${movement.unit || ''})`
-                                        : `${movement.difference < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}${(movement.lossValue ?? movement.lossCost) > 0 ? ` · pérdida ${formatCurrency(movement.lossValue ?? movement.lossCost)}` : ''}`
-                                      : `${movement.amount < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}`}
-                                  </td>
-                                  <td className="px-3 py-3">
-                                    <span className="text-slate-100">{movement.createdBy?.userName || 'Desconocido'}</span>
-                                    {movement.createdBy?.userRole && (
-                                      <span className="block text-[10px] text-slate-500">{movement.createdBy.userRole}</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-400 font-medium">Inventario Total</p>
+                      <p className="text-sm font-bold text-orange-400 font-mono">Compra: {formatCurrency(inventoryValueAtCost)} MXN</p>
+                      <p className="text-sm font-bold text-emerald-400 font-mono">Venta: {formatCurrency(inventoryValueAtSalePrice)} MXN</p>
+                      <p className="text-sm font-bold text-purple-400 font-mono">
+                        Ganancia: {formatCurrency(inventoryValueAtSalePrice - inventoryValueAtCost)} MXN
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {lowStockCount > 0 && (
+                  <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                    <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 font-medium">Productos por Resurtir</p>
+                      <p className="text-2xl font-bold text-amber-400 font-mono">{lowStockCount}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+                    <Package className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Total de SKU / Productos</p>
+                    <p className="text-2xl font-bold text-white font-mono">{products.length}</p>
                   </div>
                 </div>
               </div>
-            )}
 
-            {isTransferOpen && isStoreManager && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-                <form onSubmit={handleSubmitTransfer} className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl space-y-4">
-                  <h3 className="flex items-center gap-2 text-base font-bold text-white">
-                    <ArrowLeftRight className="h-5 w-5 text-cyan-400" />
-                    Transferir inventario
-                  </h3>
-                  <div>
-                    <label htmlFor="transfer-source" className="block text-xs font-semibold text-slate-400 mb-1">Tienda origen</label>
-                    <select
-                      id="transfer-source"
-                      value={transferForm.sourceStoreId}
-                      onChange={(event) => setTransferForm({ sourceStoreId: event.target.value, stockId: '', destStoreId: '', amount: '' })}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                    >
-                      <option value="">Selecciona la tienda origen</option>
-                      {activeStores
-                        .filter((store) => (isGeneralView
-                          ? products.some((product) => product.storeId === store.id)
-                          : store.id === activeStoreId))
-                        .map((store) => (
-                          <option key={store.id} value={store.id}>{store.name}</option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="transfer-product" className="block text-xs font-semibold text-slate-400 mb-1">Producto</label>
-                    <select
-                      id="transfer-product"
-                      value={transferForm.stockId}
-                      disabled={!transferForm.sourceStoreId}
-                      onChange={(event) => setTransferForm((form) => ({ ...form, stockId: event.target.value, amount: '' }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
-                    >
-                      <option value="">Selecciona un producto</option>
-                      {products
-                        .filter((product) => (product.storeId || activeStoreId) === transferForm.sourceStoreId && Number(product.currentStock) > 0)
-                        .map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {product.name} ({product.currentStock} {product.unit})
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="transfer-dest" className="block text-xs font-semibold text-slate-400 mb-1">Tienda destino</label>
-                    <select
-                      id="transfer-dest"
-                      value={transferForm.destStoreId}
-                      disabled={!transferForm.sourceStoreId}
-                      onChange={(event) => setTransferForm((form) => ({ ...form, destStoreId: event.target.value }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                    >
-                      <option value="">Selecciona la tienda</option>
-                      {activeStores
-                        .filter((store) => store.id !== transferForm.sourceStoreId)
-                        .map((store) => (
-                          <option key={store.id} value={store.id}>{store.name}</option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="transfer-amount" className="block text-xs font-semibold text-slate-400 mb-1">Cantidad a transferir</label>
-                    <input
-                      id="transfer-amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={transferForm.amount}
-                      onChange={(event) => setTransferForm((form) => ({ ...form, amount: event.target.value }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    Si el producto no existe en la tienda destino, se habilita con el costo del origen; si existe, se promedia el costo por cantidad.
-                  </p>
-                  {transferError && <p className="text-xs text-red-400">{transferError}</p>}
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsTransferOpen(false)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-100 cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isTransferring}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 disabled:opacity-50 cursor-pointer"
-                    >
-                      {isTransferring ? 'Transfiriendo...' : 'Transferir'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
+              <InventoryTable
+                activeStoreCount={activeStores.length}
+                deletingProductId={deletingProductId}
+                editingMinStockProductId={editingMinStockProductId}
+                editingPriceProductId={editingPriceProductId}
+                inventoryTableProducts={inventoryTableProducts}
+                isAdmin={isAdmin}
+                isCajero={isCajero}
+                isGeneralView={isGeneralView}
+                isSavingMinStock={isSavingMinStock}
+                isSavingPrice={isSavingPrice}
+                isStoreManager={isStoreManager}
+                minStockDraft={minStockDraft}
+                onCancelMinStock={() => setEditingMinStockProductId(null)}
+                onCancelPrice={() => setEditingPriceProductId(null)}
+                onDeleteProduct={handleDeleteProduct}
+                onEditMinStock={(product) => {
+                  setEditingMinStockProductId(product.id);
+                  setMinStockDraft(String(product.minStock));
+                }}
+                onEditPrice={(product) => {
+                  setEditingPriceProductId(product.id);
+                  setPriceDraft(String(product.price));
+                }}
+                onGoToCatalog={() => setActiveTab('catalog')}
+                onMinStockDraftChange={setMinStockDraft}
+                onOpenHistory={() => setIsInventoryHistoryOpen(true)}
+                onOpenInventoryAudit={handleOpenInventoryAudit}
+                onOpenRestock={handleOpenRestock}
+                onOpenTransfer={handleOpenTransfer}
+                onPriceDraftChange={setPriceDraft}
+                onSaveMinStock={handleSaveMinStock}
+                onSavePrice={handleSavePrice}
+                priceDraft={priceDraft}
+                products={products}
+                storeNameById={storeNameById}
+              />
 
-            {isInventoryAuditOpen && isAdmin && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-                <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl">
-                  <div className="flex shrink-0 items-center justify-between border-b border-slate-700 p-5">
-                    <h3 className="flex items-center gap-2 text-base font-bold text-white">
-                      <ClipboardCheck className="h-5 w-5 text-amber-400" />
-                      {showPreviousAuditTickets
-                        ? 'Tickets previos'
-                        : inventoryAuditResult ? 'Auditoría completada' : 'Auditoría de inventario'}
-                    </h3>
-                    <div className="flex items-center gap-3">
-                      {!showPreviousAuditTickets && (
-                        <button
-                          type="button"
-                          onClick={() => setShowPreviousAuditTickets(true)}
-                          className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
-                        >
-                          Tickets previos
-                        </button>
-                      )}
+              {isInventoryHistoryOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                  <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+                    <div className="flex justify-between items-center border-b border-slate-700 p-5">
+                      <h3 className="font-bold text-white text-base flex items-center gap-2">
+                        <History className="w-5 h-5 text-cyan-400" />
+                        Historial de inventario
+                      </h3>
                       <button
                         type="button"
-                        onClick={() => setIsInventoryAuditOpen(false)}
-                        disabled={isSavingInventoryAudit}
-                        aria-label="Cerrar auditoría"
-                        className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
+                        onClick={() => setIsInventoryHistoryOpen(false)}
+                        aria-label="Cerrar historial"
+                        className="text-slate-400 hover:text-white p-1 cursor-pointer"
                       >
                         ✕
                       </button>
                     </div>
-                  </div>
-
-                  {showPreviousAuditTickets ? (
-                    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
-                      {previousInventoryAudits.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-slate-400">
-                          No hay auditorías anteriores para esta vista.
-                        </p>
+                    <div className="overflow-y-auto p-5 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label htmlFor="inventory-movement-filter" className="text-xs font-medium text-slate-300">
+                          Tipo de movimiento
+                        </label>
+                        <select
+                          id="inventory-movement-filter"
+                          value={movementTypeFilter}
+                          onChange={(event) => setMovementTypeFilter(event.target.value)}
+                          className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
+                        >
+                          <option value="all">Todos</option>
+                          <option value="initial">Alta de producto</option>
+                          <option value="restock">Resurtido</option>
+                          <option value="purchase">Compra a proveedor</option>
+                          <option value="sale">Venta</option>
+                          <option value="audit">Auditoría</option>
+                          <option value="transfer_out">Transferencia enviada</option>
+                          <option value="transfer_in">Transferencia recibida</option>
+                        </select>
+                      </div>
+                      {movements.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-10">Aún no hay movimientos registrados.</p>
+                      ) : filteredMovements.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-10">No hay movimientos de este tipo.</p>
                       ) : (
-                        <div className="space-y-2">
-                          {previousInventoryAudits.map((audit) => (
-                            <div
-                              key={audit.auditId}
-                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/70 p-3"
-                            >
-                              <div className="min-w-0 text-xs">
-                                <p className="font-mono font-semibold text-slate-100">{audit.ticketId}</p>
-                                <p className="text-slate-400">
-                                  {audit.timestamp} · {storeNameById.get(audit.storeId) || audit.storeId || 'Sin tienda'}
-                                  {' · '}{audit.auditedProducts} productos
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setTicketToPrint({ type: 'audit', data: audit })}
-                                className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
-                              >
-                                <Printer className="h-3.5 w-3.5" />
-                                Imprimir ticket
-                              </button>
-                            </div>
-                          ))}
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-162.5 text-left text-xs text-slate-300">
+                            <thead className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
+                              <tr>
+                                <th className="px-3 py-3">Fecha</th>
+                                <th className="px-3 py-3">Movimiento</th>
+                                <th className="px-3 py-3">Producto</th>
+                                <th className="px-3 py-3">Cantidad</th>
+                                <th className="px-3 py-3">Responsable</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700/60">
+                              {filteredMovements.map((movement) => {
+                                const counterpartName = storeNameById.get(movement.counterpartStoreId) || 'otra tienda';
+                                const movementLabel = movement.type === 'transfer_out'
+                                  ? `Transferencia a ${counterpartName}`
+                                  : movement.type === 'transfer_in'
+                                    ? `Transferencia de ${counterpartName}`
+                                    : movement.type === 'restock'
+                                      ? 'Resurtido'
+                                      : movement.type === 'purchase'
+                                        ? `Compra${movement.orderNumber ? ` ${movement.orderNumber}` : ''}`
+                                        : movement.type === 'sale'
+                                          ? `Venta${movement.ticketId ? ` ${movement.ticketId}` : ''}`
+                                          : movement.type === 'audit'
+                                            ? `Auditoría${movement.ticketId ? ` ${movement.ticketId}` : ''}`
+                                            : 'Producto creado';
+                                const quantity = Math.abs(movement.amount || 0);
+                                return (
+                                  <tr key={movement.id} className="hover:bg-slate-700/30">
+                                    <td className="px-3 py-3 whitespace-nowrap">{movement.timestamp}</td>
+                                    <td className="px-3 py-3 font-semibold text-slate-100">{movementLabel}</td>
+                                    <td className="px-3 py-3">{movement.productName || 'Producto'}</td>
+                                    <td className="px-3 py-3 font-mono">
+                                      {movement.type === 'audit'
+                                        ? movement.difference === 0
+                                          ? `Sin diferencia (${movement.countedStock} ${movement.unit || ''})`
+                                          : `${movement.difference < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}${(movement.lossValue ?? movement.lossCost) > 0 ? ` · pérdida ${formatCurrency(movement.lossValue ?? movement.lossCost)}` : ''}`
+                                        : `${movement.amount < 0 ? '-' : '+'}${quantity} ${movement.unit || ''}`}
+                                    </td>
+                                    <td className="px-3 py-3">
+                                      <span className="text-slate-100">{movement.createdBy?.userName || 'Desconocido'}</span>
+                                      {movement.createdBy?.userRole && (
+                                        <span className="block text-[10px] text-slate-500">{movement.createdBy.userRole}</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
-                      <div className="mt-auto flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setShowPreviousAuditTickets(false)}
-                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
-                        >
-                          Volver
-                        </button>
-                      </div>
                     </div>
-                  ) : inventoryAuditResult ? (
-                    <div className="space-y-4 overflow-y-auto p-5">
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="rounded-lg bg-slate-900 p-3">
-                          <p className="text-[11px] text-slate-400">Productos contados</p>
-                          <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.auditedProducts}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-900 p-3">
-                          <p className="text-[11px] text-slate-400">Productos ajustados</p>
-                          <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.adjustedProducts}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-900 p-3">
-                          <p className="text-[11px] text-slate-400">Faltante</p>
-                          <p className="mt-1 font-mono text-lg font-bold text-rose-300">{inventoryAuditResult.shortageUnits.toFixed(2)}</p>
-                          <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditResult.lossValue)}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-900 p-3">
-                          <p className="text-[11px] text-slate-400">Sobrante</p>
-                          <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{inventoryAuditResult.surplusUnits.toFixed(2)}</p>
-                          <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditResult.surplusValue)}</p>
-                        </div>
-                      </div>
-
-                      <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-700">
-                        <table className="w-full min-w-170 text-left text-xs text-slate-300">
-                          <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-                            <tr>
-                              <th className="px-3 py-3">Producto</th>
-                              <th className="px-3 py-3">Stock esperado</th>
-                              <th className="px-3 py-3">Conteo físico</th>
-                              <th className="px-3 py-3">Diferencia</th>
-                              <th className="px-3 py-3">Valor (precio de venta)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-700/60">
-                            {inventoryAuditResult.lines.map((line) => (
-                              <tr key={line.productId}>
-                                <td className="px-3 py-2.5 font-medium text-slate-100">{line.productName}</td>
-                                <td className="px-3 py-2.5 font-mono">{line.expectedStock.toFixed(2)} {line.unit}</td>
-                                <td className="px-3 py-2.5 font-mono">{line.countedStock.toFixed(2)} {line.unit}</td>
-                                <td className={`px-3 py-2.5 font-mono font-semibold ${line.difference < 0 ? 'text-rose-300' : line.difference > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                                  {line.difference > 0 ? '+' : ''}{line.difference.toFixed(2)} {line.unit}
-                                </td>
-                                <td className={`px-3 py-2.5 font-mono ${line.shortage > 0 ? 'text-rose-300' : line.surplus > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                                  {line.shortage > 0
-                                    ? `-${formatCurrency(line.lossValue)}`
-                                    : line.surplus > 0
-                                      ? `+${formatCurrency(line.surplusValue)}`
-                                      : '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setTicketToPrint({ type: 'audit', data: inventoryAuditResult })}
-                          className="flex items-center gap-2 rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
-                        >
-                          <Printer className="h-4 w-4" />
-                          Imprimir ticket
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsInventoryAuditOpen(false)}
-                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
-                        >
-                          Cerrar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <form onSubmit={handleCompleteInventoryAudit} className="flex min-h-0 flex-1 flex-col">
-                      <div className="space-y-4 overflow-y-auto p-5">
-                        {isGeneralView && (
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-slate-300">
-                              Tienda a auditar: <span className="text-cyan-400">*</span>
-                            </label>
-                            <select
-                              required
-                              value={inventoryTargetStoreId}
-                              onChange={(event) => handleInventoryAuditStoreChange(event.target.value)}
-                              className="w-full max-w-sm rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none"
-                            >
-                              <option value="">Selecciona una tienda</option>
-                              {activeStores.map((store) => (
-                                <option key={store.id} value={store.id}>{store.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        <p className="text-xs text-slate-400">
-                          Compara cada conteo físico con el stock esperado. Al guardar, las diferencias corregirán las existencias.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                            <p className="text-[11px] text-slate-400">Productos contados</p>
-                            <p className="mt-1 font-mono font-bold text-white">{inventoryAuditPreview.countedProducts} / {inventoryProductsForEdit.length}</p>
-                          </div>
-                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                            <p className="text-[11px] text-slate-400">Faltante</p>
-                            <p className="mt-1 font-mono font-bold text-rose-300">{inventoryAuditPreview.shortageUnits.toFixed(2)}</p>
-                            <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditPreview.lossValue)}</p>
-                          </div>
-                          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                            <p className="text-[11px] text-slate-400">Sobrante</p>
-                            <p className="mt-1 font-mono font-bold text-emerald-300">{inventoryAuditPreview.surplusUnits.toFixed(2)}</p>
-                            <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditPreview.surplusValue)}</p>
-                          </div>
-                        </div>
-
-                        {inventoryProductsForEdit.length > 250 && (
-                          <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                            Esta auditoría admite hasta 250 productos por transacción.
-                          </p>
-                        )}
-                        {inventoryProductsForEdit.length === 0 ? (
-                          <p className="py-8 text-center text-sm text-slate-400">No hay productos para auditar.</p>
-                        ) : (
-                          <div className="max-h-[45vh] overflow-auto rounded-xl border border-slate-700">
-                            <table className="w-full min-w-175 text-left text-xs text-slate-300">
-                              <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-                                <tr>
-                                  <th className="px-3 py-3">Producto</th>
-                                  <th className="px-3 py-3">Stock esperado</th>
-                                  <th className="px-3 py-3">Conteo físico</th>
-                                  <th className="px-3 py-3">Diferencia preliminar</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-700/60">
-                                {inventoryProductsForEdit.map((product) => {
-                                  const rawCount = inventoryAuditCounts[product.id] ?? '';
-                                  const countedStock = rawCount === '' ? null : Number(rawCount);
-                                  const validCount = Number.isFinite(countedStock)
-                                    && countedStock >= 0
-                                    && Number((countedStock * 100).toFixed(0)) / 100 === countedStock;
-                                  const difference = validCount
-                                    ? Number((countedStock - product.currentStock).toFixed(2))
-                                    : null;
-                                  const shortage = difference === null ? 0 : Math.max(0, -difference);
-
-                                  return (
-                                    <tr key={product.id}>
-                                      <td className="px-3 py-2.5 font-medium text-slate-100">{product.name}</td>
-                                      <td className="px-3 py-2.5 font-mono">{product.currentStock.toFixed(2)} {product.unit}</td>
-                                      <td className="px-3 py-2.5">
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          required
-                                          aria-label={`Conteo físico de ${product.name}`}
-                                          value={rawCount}
-                                          onChange={(event) => setInventoryAuditCounts((previous) => ({
-                                            ...previous,
-                                            [product.id]: event.target.value,
-                                          }))}
-                                          className="w-28 rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 font-mono text-white focus:outline-none focus:border-cyan-400"
-                                        />
-                                        <span className="ml-2 text-slate-400">{product.unit}</span>
-                                      </td>
-                                      <td className="px-3 py-2.5">
-                                        {difference === null ? (
-                                          <span className="text-slate-500">Pendiente</span>
-                                        ) : difference < 0 ? (
-                                          <span className="text-rose-300">Faltan {shortage.toFixed(2)} {product.unit} · {formatCurrency(shortage * product.price)}</span>
-                                        ) : difference > 0 ? (
-                                          <span className="text-emerald-300">
-                                            Sobran +{difference.toFixed(2)} {product.unit} · {formatCurrency(difference * product.price)}
-                                          </span>
-                                        ) : (
-                                          <span className="text-slate-400">Sin diferencia</span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-
-                        {inventoryAuditError && (
-                          <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                            {inventoryAuditError}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex shrink-0 justify-end gap-2 border-t border-slate-700 p-4">
-                        <button
-                          type="button"
-                          onClick={() => setIsInventoryAuditOpen(false)}
-                          disabled={isSavingInventoryAudit}
-                          className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isSavingInventoryAudit || inventoryProductsForEdit.length === 0 || inventoryProductsForEdit.length > 250 || inventoryAuditPreview.countedProducts !== inventoryProductsForEdit.length}
-                          className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <ClipboardCheck className="h-4 w-4" />
-                          {isSavingInventoryAudit ? 'Aplicando ajustes...' : 'Aplicar conteo y guardar'}
-                        </button>
-                      </div>
-                    </form>
-                  )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Modal de solicitud de compra */}
-            {isRestockOpen && restockProduct && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
-                  <div className="flex justify-between items-center border-b border-slate-700 pb-3">
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <Truck className="w-5 h-5 text-cyan-400" />
-                      Solicitar compra
+              {isTransferOpen && isStoreManager && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+                  <form onSubmit={handleSubmitTransfer} className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl space-y-4">
+                    <h3 className="flex items-center gap-2 text-base font-bold text-white">
+                      <ArrowLeftRight className="h-5 w-5 text-cyan-400" />
+                      Transferir inventario
                     </h3>
-                    <button type="button" onClick={() => setIsRestockOpen(false)} disabled={isSubmittingPurchaseRequest} className="text-slate-400 hover:text-white disabled:opacity-50">✕</button>
-                  </div>
-
-                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 space-y-1">
-                    <p className="text-xs text-slate-400">Producto seleccionado:</p>
-                    <p className="font-bold text-sm text-white">{restockProduct.name}</p>
-                    <p className="text-xs text-cyan-400">Stock Actual: {restockProduct.currentStock} {restockProduct.unit}</p>
-                    <p className="text-xs text-slate-400">Tienda: {storeNameById.get(restockProduct.storeId) || 'Tienda asignada'}</p>
-                  </div>
-
-                  <form onSubmit={handleSubmitPurchaseRequest} className="space-y-4">
-                    {restockError && (
-                      <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
-                        <p>{restockError}</p>
-                      </div>
-                    )}
                     <div>
-                      <label className="text-xs text-slate-300 block mb-1">Cantidad solicitada ({restockProduct.unit}):</label>
+                      <label htmlFor="transfer-source" className="block text-xs font-semibold text-slate-400 mb-1">Tienda origen</label>
+                      <select
+                        id="transfer-source"
+                        value={transferForm.sourceStoreId}
+                        onChange={(event) => setTransferForm({ sourceStoreId: event.target.value, stockId: '', destStoreId: '', amount: '' })}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                      >
+                        <option value="">Selecciona la tienda origen</option>
+                        {activeStores
+                          .filter((store) => (isGeneralView
+                            ? products.some((product) => product.storeId === store.id)
+                            : store.id === activeStoreId))
+                          .map((store) => (
+                            <option key={store.id} value={store.id}>{store.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="transfer-product" className="block text-xs font-semibold text-slate-400 mb-1">Producto</label>
+                      <select
+                        id="transfer-product"
+                        value={transferForm.stockId}
+                        disabled={!transferForm.sourceStoreId}
+                        onChange={(event) => setTransferForm((form) => ({ ...form, stockId: event.target.value, amount: '' }))}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                      >
+                        <option value="">Selecciona un producto</option>
+                        {products
+                          .filter((product) => (product.storeId || activeStoreId) === transferForm.sourceStoreId && Number(product.currentStock) > 0)
+                          .map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name} ({product.currentStock} {product.unit})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="transfer-dest" className="block text-xs font-semibold text-slate-400 mb-1">Tienda destino</label>
+                      <select
+                        id="transfer-dest"
+                        value={transferForm.destStoreId}
+                        disabled={!transferForm.sourceStoreId}
+                        onChange={(event) => setTransferForm((form) => ({ ...form, destStoreId: event.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                      >
+                        <option value="">Selecciona la tienda</option>
+                        {activeStores
+                          .filter((store) => store.id !== transferForm.sourceStoreId)
+                          .map((store) => (
+                            <option key={store.id} value={store.id}>{store.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="transfer-amount" className="block text-xs font-semibold text-slate-400 mb-1">Cantidad a transferir</label>
                       <input
+                        id="transfer-amount"
                         type="number"
-                        min="0.01"
+                        min="0"
                         step="0.01"
-                        placeholder="Ej. 50, 100, 200"
-                        required
-                        value={restockAmount}
-                        onChange={(e) => setRestockAmount(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-lg font-bold text-cyan-400 focus:outline-none focus:border-cyan-400"
+                        value={transferForm.amount}
+                        onChange={(event) => setTransferForm((form) => ({ ...form, amount: event.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
                       />
                     </div>
-                    <p className="text-[11px] text-slate-400">Las solicitudes del mismo proveedor se agruparán para generar una sola orden. El inventario no cambia hasta recibirla.</p>
-
-                    <div className="flex justify-end gap-2 pt-2">
+                    <p className="text-[11px] text-slate-500">
+                      Si el producto no existe en la tienda destino, se habilita con el costo del origen; si existe, se promedia el costo por cantidad.
+                    </p>
+                    {transferError && <p className="text-xs text-red-400">{transferError}</p>}
+                    <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => setIsRestockOpen(false)}
-                        disabled={isSubmittingPurchaseRequest}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold disabled:opacity-50"
+                        onClick={() => setIsTransferOpen(false)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-100 cursor-pointer"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
-                        disabled={isSubmittingPurchaseRequest}
-                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
+                        disabled={isTransferring}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 disabled:opacity-50 cursor-pointer"
                       >
-                        {isSubmittingPurchaseRequest ? 'Enviando...' : 'Enviar solicitud'}
+                        {isTransferring ? 'Transfiriendo...' : 'Transferir'}
                       </button>
                     </div>
                   </form>
                 </div>
-              </div>
-            )}
+              )}
 
-          </div>
-        )}
+              {isInventoryAuditOpen && isAdmin && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+                  <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl">
+                    <div className="flex shrink-0 items-center justify-between border-b border-slate-700 p-5">
+                      <h3 className="flex items-center gap-2 text-base font-bold text-white">
+                        <ClipboardCheck className="h-5 w-5 text-amber-400" />
+                        {showPreviousAuditTickets
+                          ? 'Tickets previos'
+                          : inventoryAuditResult ? 'Auditoría completada' : 'Auditoría de inventario'}
+                      </h3>
+                      <div className="flex items-center gap-3">
+                        {!showPreviousAuditTickets && (
+                          <button
+                            type="button"
+                            onClick={() => setShowPreviousAuditTickets(true)}
+                            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                          >
+                            Tickets previos
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsInventoryAuditOpen(false)}
+                          disabled={isSavingInventoryAudit}
+                          aria-label="Cerrar auditoría"
+                          className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
 
-        {/* TAB 3: VENTAS Y REPORTE DIARIO */}
-        {visibleTab === 'sales' && canAccessSales && (
-          <div className="space-y-5">
+                    {showPreviousAuditTickets ? (
+                      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+                        {previousInventoryAudits.length === 0 ? (
+                          <p className="py-8 text-center text-sm text-slate-400">
+                            No hay auditorías anteriores para esta vista.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {previousInventoryAudits.map((audit) => (
+                              <div
+                                key={audit.auditId}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/70 p-3"
+                              >
+                                <div className="min-w-0 text-xs">
+                                  <p className="font-mono font-semibold text-slate-100">{audit.ticketId}</p>
+                                  <p className="text-slate-400">
+                                    {audit.timestamp} · {storeNameById.get(audit.storeId) || audit.storeId || 'Sin tienda'}
+                                    {' · '}{audit.auditedProducts} productos
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setTicketToPrint({ type: 'audit', data: audit })}
+                                  className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                                >
+                                  <Printer className="h-3.5 w-3.5" />
+                                  Imprimir ticket
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="mt-auto flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setShowPreviousAuditTickets(false)}
+                            className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                          >
+                            Volver
+                          </button>
+                        </div>
+                      </div>
+                    ) : inventoryAuditResult ? (
+                      <div className="space-y-4 overflow-y-auto p-5">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div className="rounded-lg bg-slate-900 p-3">
+                            <p className="text-[11px] text-slate-400">Productos contados</p>
+                            <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.auditedProducts}</p>
+                          </div>
+                          <div className="rounded-lg bg-slate-900 p-3">
+                            <p className="text-[11px] text-slate-400">Productos ajustados</p>
+                            <p className="mt-1 font-mono text-lg font-bold text-white">{inventoryAuditResult.adjustedProducts}</p>
+                          </div>
+                          <div className="rounded-lg bg-slate-900 p-3">
+                            <p className="text-[11px] text-slate-400">Faltante</p>
+                            <p className="mt-1 font-mono text-lg font-bold text-rose-300">{inventoryAuditResult.shortageUnits.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditResult.lossValue)}</p>
+                          </div>
+                          <div className="rounded-lg bg-slate-900 p-3">
+                            <p className="text-[11px] text-slate-400">Sobrante</p>
+                            <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{inventoryAuditResult.surplusUnits.toFixed(2)}</p>
+                            <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditResult.surplusValue)}</p>
+                          </div>
+                        </div>
 
-            {/* Indicador: cajero ve solo sus ventas */}
-            {isCajero && (
-              <div className="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl text-xs flex items-center gap-2">
-                <User className="w-4 h-4 shrink-0" />
-                <span>Estás viendo únicamente <strong>tus ventas</strong>. Los totales y el historial reflejan solo las transacciones que registraste.</span>
-              </div>
-            )}
+                        <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-700">
+                          <table className="w-full min-w-170 text-left text-xs text-slate-300">
+                            <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                              <tr>
+                                <th className="px-3 py-3">Producto</th>
+                                <th className="px-3 py-3">Stock esperado</th>
+                                <th className="px-3 py-3">Conteo físico</th>
+                                <th className="px-3 py-3">Diferencia</th>
+                                <th className="px-3 py-3">Valor (precio de venta)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700/60">
+                              {inventoryAuditResult.lines.map((line) => (
+                                <tr key={line.productId}>
+                                  <td className="px-3 py-2.5 font-medium text-slate-100">{line.productName}</td>
+                                  <td className="px-3 py-2.5 font-mono">{line.expectedStock.toFixed(2)} {line.unit}</td>
+                                  <td className="px-3 py-2.5 font-mono">{line.countedStock.toFixed(2)} {line.unit}</td>
+                                  <td className={`px-3 py-2.5 font-mono font-semibold ${line.difference < 0 ? 'text-rose-300' : line.difference > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                    {line.difference > 0 ? '+' : ''}{line.difference.toFixed(2)} {line.unit}
+                                  </td>
+                                  <td className={`px-3 py-2.5 font-mono ${line.shortage > 0 ? 'text-rose-300' : line.surplus > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                    {line.shortage > 0
+                                      ? `-${formatCurrency(line.lossValue)}`
+                                      : line.surplus > 0
+                                        ? `+${formatCurrency(line.surplusValue)}`
+                                        : '—'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setTicketToPrint({ type: 'audit', data: inventoryAuditResult })}
+                            className="flex items-center gap-2 rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                          >
+                            <Printer className="h-4 w-4" />
+                            Imprimir ticket
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsInventoryAuditOpen(false)}
+                            className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                          >
+                            Cerrar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleCompleteInventoryAudit} className="flex min-h-0 flex-1 flex-col">
+                        <div className="space-y-4 overflow-y-auto p-5">
+                          {isGeneralView && (
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-slate-300">
+                                Tienda a auditar: <span className="text-cyan-400">*</span>
+                              </label>
+                              <select
+                                required
+                                value={inventoryTargetStoreId}
+                                onChange={(event) => handleInventoryAuditStoreChange(event.target.value)}
+                                className="w-full max-w-sm rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none"
+                              >
+                                <option value="">Selecciona una tienda</option>
+                                {activeStores.map((store) => (
+                                  <option key={store.id} value={store.id}>{store.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
 
-            {cashShift?.status === 'closed' && cashShift.storeId === activeStoreId && (
-              <section className="rounded-2xl border border-slate-700 bg-slate-800 p-4 shadow-md">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+                          <p className="text-xs text-slate-400">
+                            Compara cada conteo físico con el stock esperado. Al guardar, las diferencias corregirán las existencias.
+                          </p>
+
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                              <p className="text-[11px] text-slate-400">Productos contados</p>
+                              <p className="mt-1 font-mono font-bold text-white">{inventoryAuditPreview.countedProducts} / {inventoryProductsForEdit.length}</p>
+                            </div>
+                            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                              <p className="text-[11px] text-slate-400">Faltante</p>
+                              <p className="mt-1 font-mono font-bold text-rose-300">{inventoryAuditPreview.shortageUnits.toFixed(2)}</p>
+                              <p className="mt-1 text-[11px] text-rose-200">Pérdida a precio de venta: {formatCurrency(inventoryAuditPreview.lossValue)}</p>
+                            </div>
+                            <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                              <p className="text-[11px] text-slate-400">Sobrante</p>
+                              <p className="mt-1 font-mono font-bold text-emerald-300">{inventoryAuditPreview.surplusUnits.toFixed(2)}</p>
+                              <p className="mt-1 text-[11px] text-emerald-200">Monto a favor a precio de venta: {formatCurrency(inventoryAuditPreview.surplusValue)}</p>
+                            </div>
+                          </div>
+
+                          {inventoryProductsForEdit.length > 250 && (
+                            <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                              Esta auditoría admite hasta 250 productos por transacción.
+                            </p>
+                          )}
+                          {inventoryProductsForEdit.length === 0 ? (
+                            <p className="py-8 text-center text-sm text-slate-400">No hay productos para auditar.</p>
+                          ) : (
+                            <div className="max-h-[45vh] overflow-auto rounded-xl border border-slate-700">
+                              <table className="w-full min-w-175 text-left text-xs text-slate-300">
+                                <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                                  <tr>
+                                    <th className="px-3 py-3">Producto</th>
+                                    <th className="px-3 py-3">Stock esperado</th>
+                                    <th className="px-3 py-3">Conteo físico</th>
+                                    <th className="px-3 py-3">Diferencia preliminar</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-700/60">
+                                  {inventoryProductsForEdit.map((product) => {
+                                    const rawCount = inventoryAuditCounts[product.id] ?? '';
+                                    const countedStock = rawCount === '' ? null : Number(rawCount);
+                                    const validCount = Number.isFinite(countedStock)
+                                      && countedStock >= 0
+                                      && Number((countedStock * 100).toFixed(0)) / 100 === countedStock;
+                                    const difference = validCount
+                                      ? Number((countedStock - product.currentStock).toFixed(2))
+                                      : null;
+                                    const shortage = difference === null ? 0 : Math.max(0, -difference);
+
+                                    return (
+                                      <tr key={product.id}>
+                                        <td className="px-3 py-2.5 font-medium text-slate-100">{product.name}</td>
+                                        <td className="px-3 py-2.5 font-mono">{product.currentStock.toFixed(2)} {product.unit}</td>
+                                        <td className="px-3 py-2.5">
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            required
+                                            aria-label={`Conteo físico de ${product.name}`}
+                                            value={rawCount}
+                                            onChange={(event) => setInventoryAuditCounts((previous) => ({
+                                              ...previous,
+                                              [product.id]: event.target.value,
+                                            }))}
+                                            className="w-28 rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 font-mono text-white focus:outline-none focus:border-cyan-400"
+                                          />
+                                          <span className="ml-2 text-slate-400">{product.unit}</span>
+                                        </td>
+                                        <td className="px-3 py-2.5">
+                                          {difference === null ? (
+                                            <span className="text-slate-500">Pendiente</span>
+                                          ) : difference < 0 ? (
+                                            <span className="text-rose-300">Faltan {shortage.toFixed(2)} {product.unit} · {formatCurrency(shortage * product.price)}</span>
+                                          ) : difference > 0 ? (
+                                            <span className="text-emerald-300">
+                                              Sobran +{difference.toFixed(2)} {product.unit} · {formatCurrency(difference * product.price)}
+                                            </span>
+                                          ) : (
+                                            <span className="text-slate-400">Sin diferencia</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {inventoryAuditError && (
+                            <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                              {inventoryAuditError}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-700 p-4">
+                          <button
+                            type="button"
+                            onClick={() => setIsInventoryAuditOpen(false)}
+                            disabled={isSavingInventoryAudit}
+                            className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={isSavingInventoryAudit || inventoryProductsForEdit.length === 0 || inventoryProductsForEdit.length > 250 || inventoryAuditPreview.countedProducts !== inventoryProductsForEdit.length}
+                            className="flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <ClipboardCheck className="h-4 w-4" />
+                            {isSavingInventoryAudit ? 'Aplicando ajustes...' : 'Aplicar conteo y guardar'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Modal de solicitud de compra */}
+              {isRestockOpen && restockProduct && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                  <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-700 pb-3">
+                      <h3 className="font-bold text-white text-base flex items-center gap-2">
+                        <Truck className="w-5 h-5 text-cyan-400" />
+                        Solicitar compra
+                      </h3>
+                      <button type="button" onClick={() => setIsRestockOpen(false)} disabled={isSubmittingPurchaseRequest} className="text-slate-400 hover:text-white disabled:opacity-50">✕</button>
+                    </div>
+
+                    <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 space-y-1">
+                      <p className="text-xs text-slate-400">Producto seleccionado:</p>
+                      <p className="font-bold text-sm text-white">{restockProduct.name}</p>
+                      <p className="text-xs text-cyan-400">Stock Actual: {restockProduct.currentStock} {restockProduct.unit}</p>
+                      <p className="text-xs text-slate-400">Tienda: {storeNameById.get(restockProduct.storeId) || 'Tienda asignada'}</p>
+                    </div>
+
+                    <form onSubmit={handleSubmitPurchaseRequest} className="space-y-4">
+                      {restockError && (
+                        <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                          <p>{restockError}</p>
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-xs text-slate-300 block mb-1">Cantidad solicitada ({restockProduct.unit}):</label>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          placeholder="Ej. 50, 100, 200"
+                          required
+                          value={restockAmount}
+                          onChange={(e) => setRestockAmount(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-lg font-bold text-cyan-400 focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+                      <p className="text-[11px] text-slate-400">Las solicitudes del mismo proveedor se agruparán para generar una sola orden. El inventario no cambia hasta recibirla.</p>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsRestockOpen(false)}
+                          disabled={isSubmittingPurchaseRequest}
+                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSubmittingPurchaseRequest}
+                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSubmittingPurchaseRequest ? 'Enviando...' : 'Enviar solicitud'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* TAB 3: VENTAS Y REPORTE DIARIO */}
+          {visibleTab === 'sales' && canAccessSales && (
+            <div className="space-y-5">
+
+              {/* Indicador: cajero ve solo sus ventas */}
+              {isCajero && (
+                <div className="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl text-xs flex items-center gap-2">
+                  <User className="w-4 h-4 shrink-0" />
+                  <span>Estás viendo únicamente <strong>tus ventas</strong>. Los totales y el historial reflejan solo las transacciones que registraste.</span>
+                </div>
+              )}
+
+              {cashShift?.status === 'closed' && cashShift.storeId === activeStoreId && (
+                <section className="rounded-2xl border border-slate-700 bg-slate-800 p-4 shadow-md">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-bold text-white">Último cierre de caja</h2>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {cashShift.closedAt?.toDate
+                          ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+                          : 'Fecha no disponible'}
+                        {' · Turno '}{cashShift.id.slice(0, 8).toUpperCase()}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTicketToPrint({
+                        type: 'cashShift',
+                        data: {
+                          ...cashShift,
+                          storeName: storeNameById.get(activeStoreId) || activeStoreId,
+                          timestamp: cashShift.closedAt?.toDate
+                            ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+                            : 'Fecha no disponible',
+                        },
+                      })}
+                      className="flex items-center gap-2 rounded-xl border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                      Imprimir cierre
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div>
+                      <p className="text-[11px] text-slate-400">Efectivo esperado</p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.expectedCashCents / 100)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-400">Efectivo contado</p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.countedCashCents / 100)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-400">Diferencia</p>
+                      <p className={`mt-1 font-mono text-sm font-semibold ${cashShift.cashDifferenceCents === 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                        {formatCurrency(cashShift.cashDifferenceCents / 100)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-400">Tickets</p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-white">{cashShift.saleCount}</p>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Sales Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+                    <DollarSign className="w-6 h-6" />
+                  </div>
                   <div>
-                    <h2 className="text-sm font-bold text-white">Último cierre de caja</h2>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {cashShift.closedAt?.toDate
-                        ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
-                        : 'Fecha no disponible'}
-                      {' · Turno '}{cashShift.id.slice(0, 8).toUpperCase()}
+                    <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mi Venta del Día' : 'Venta Total del Día'}</p>
+                    <p className="text-2xl font-bold text-emerald-400 font-mono">
+                      {formatCurrency(visibleSalesToday.reduce((acc, s) => acc + s.total, 0))} MXN
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20">
+                    <Droplet className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Litros que Despaché Hoy' : 'Litros Despachados Hoy'}</p>
+                    <p className="text-2xl font-bold text-white font-mono">
+                      {cashClosureSummary.liters.toFixed(1)} L
+                    </p>
+                    {cashClosureSummary.others.length > 0 && (
+                      <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mis Tickets' : 'Tickets Registrados'}</p>
+                    <p className="text-2xl font-bold text-white font-mono">{visibleSalesHistory.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-cyan-400" />
+                      Resumen de ventas del día
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'long' })}
+                      {isCajero ? ' · Cierre personal' : ' · Cierre general'}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setTicketToPrint({
-                      type: 'cashShift',
+                      type: 'cashClosure',
                       data: {
-                        ...cashShift,
-                        storeName: storeNameById.get(activeStoreId) || activeStoreId,
-                        timestamp: cashShift.closedAt?.toDate
-                          ? cashShift.closedAt.toDate().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
-                          : 'Fecha no disponible',
+                        ...cashClosureSummary,
+                        date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
+                        closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+                        closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
                       },
                     })}
-                    className="flex items-center gap-2 rounded-xl border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                    disabled={cashClosureSummary.tickets === 0}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Printer className="h-3.5 w-3.5" />
-                    Imprimir cierre
+                    <Printer className="w-4 h-4" />
+                    Imprimir resumen
                   </button>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
                   <div>
-                    <p className="text-[11px] text-slate-400">Efectivo esperado</p>
-                    <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.expectedCashCents / 100)}</p>
+                    <p className="text-xs text-slate-400">Ventas registradas</p>
+                    <p className="text-xl font-bold font-mono text-emerald-400">{formatCurrency(cashClosureSummary.total)} MXN</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-slate-400">Efectivo contado</p>
-                    <p className="mt-1 font-mono text-sm font-semibold text-white">{formatCurrency(cashShift.countedCashCents / 100)}</p>
+                    <p className="text-xs text-slate-400">Tickets</p>
+                    <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.tickets}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-slate-400">Diferencia</p>
-                    <p className={`mt-1 font-mono text-sm font-semibold ${cashShift.cashDifferenceCents === 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
-                      {formatCurrency(cashShift.cashDifferenceCents / 100)}
-                    </p>
+                    <p className="text-xs text-slate-400">Litros despachados</p>
+                    <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.liters.toFixed(2)} L</p>
+                    {cashClosureSummary.others.length > 0 && (
+                      <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5 border-t border-slate-700 pt-3">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por canal</p>
+                    {cashClosureSummary.channels.length === 0 ? (
+                      <p className="text-xs text-slate-500">Sin ventas registradas hoy.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {cashClosureSummary.channels.map(({ channel, tickets, total }) => (
+                          <div key={channel} className="flex justify-between gap-3 text-xs">
+                            <span className="text-slate-400">{channel} · {tickets} {tickets === 1 ? 'ticket' : 'tickets'}</span>
+                            <span className="font-mono font-semibold text-slate-200">{formatCurrency(total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
-                    <p className="text-[11px] text-slate-400">Tickets</p>
-                    <p className="mt-1 font-mono text-sm font-semibold text-white">{cashShift.saleCount}</p>
+                    <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por producto</p>
+                    {cashClosureSummary.products.length === 0 ? (
+                      <p className="text-xs text-slate-500">Sin productos vendidos hoy.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                        {cashClosureSummary.products.map(({ key, name, unit, quantity, total }) => (
+                          <div key={key} className="flex justify-between gap-3 text-xs">
+                            <span className="text-slate-400 truncate">{name} · {quantity.toFixed(2)} {unit}</span>
+                            <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">{formatCurrency(total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>
-            )}
 
-            {/* Sales Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                  <DollarSign className="w-6 h-6" />
+              {/* Sales Log Table */}
+              <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
+                <div className="p-4 border-b border-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-cyan-400" />
+                      Historial de Transacciones Recientes
+                    </h2>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mi Venta del Día' : 'Venta Total del Día'}</p>
-                  <p className="text-2xl font-bold text-emerald-400 font-mono">
-                    {formatCurrency(visibleSalesToday.reduce((acc, s) => acc + s.total, 0))} MXN
-                  </p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
+                      <tr>
+                        <th className="px-4 py-3">Folio</th>
+                        <th className="px-4 py-3">Hora / Fecha</th>
+                        <th className="px-4 py-3">Canal</th>
+                        <th className="px-4 py-3">Pago</th>
+                        <th className="px-4 py-3">Vendedor</th>
+                        <th className="px-4 py-3">Detalle</th>
+                        <th className="px-4 py-3">Cantidad</th>
+                        <th className="px-4 py-3 text-right">Total ($ MXN)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/60">
+                      {visibleSalesHistory.map(sale => (
+                        <tr key={sale.id} className="hover:bg-slate-700/30 transition">
+                          <td className="px-4 py-3 font-mono font-bold text-cyan-400">{sale.ticketId}</td>
+                          <td className="px-4 py-3 text-slate-400">{sale.timestamp}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${sale.channel === 'Mostrador' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                              sale.channel === 'Uber Flash' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
+                                'bg-green-500/10 text-green-300 border-green-500/30'
+                              }`}>
+                              {sale.channel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-300">
+                            {sale.paymentMethod === 'cash' ? 'Efectivo'
+                              : sale.paymentMethod === 'card' ? 'Tarjeta'
+                                : sale.paymentMethod === 'transfer' ? 'Transferencia'
+                                  : 'No registrado'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <User className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span className="text-slate-200 font-medium truncate max-w-30">
+                                {sale.createdBy?.userName || 'Desconocido'}
+                              </span>
+                            </div>
+                            {sale.createdBy?.userRole && (
+                              <span className={`mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-semibold border ${sale.createdBy.userRole === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
+                                sale.createdBy.userRole === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                                  'bg-slate-500/15 text-slate-400 border-slate-500/30'
+                                }`}>
+                                {sale.createdBy.userRole === 'admin' ? 'Admin' :
+                                  sale.createdBy.userRole === 'supervisor' ? 'Supervisor' :
+                                    sale.createdBy.userRole === 'cajero' ? 'Cajero' : sale.createdBy.userRole}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-300 max-w-xs">
+                            {sale.items.map((it, idx) => (
+                              <span key={idx} className="block truncate">
+                                • {it.name}
+                              </span>
+                            ))}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-300">
+                            {sale.items.map((it, idx) => (
+                              <span key={it.productId || `${it.name}-${idx}`} className="block truncate">
+                                • {it.qty} {it.unit || 'L'}
+                              </span>
+                            ))}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400 text-sm">
+                            <span>{formatCurrency(sale.total)}</span>
+                            <button
+                              type="button"
+                              onClick={() => setTicketToPrint({ type: 'sale', data: sale })}
+                              className="ml-3 inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-cyan-500 hover:text-slate-950"
+                            >
+                              <Printer className="h-3 w-3" />
+                              Imprimir Ticket
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20">
-                  <Droplet className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Litros que Despaché Hoy' : 'Litros Despachados Hoy'}</p>
-                  <p className="text-2xl font-bold text-white font-mono">
-                    {cashClosureSummary.liters.toFixed(1)} L
-                  </p>
-                  {cashClosureSummary.others.length > 0 && (
-                    <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
-                  )}
-                </div>
-              </div>
+            </div>
+          )}
 
-              <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
-                <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
-                  <TrendingUp className="w-6 h-6" />
-                </div>
+          {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
+          {visibleTab === 'users' && canAccessUsers && (
+            <AdminPanel
+              currentUser={currentUser}
+              isAdmin={isAdmin}
+              receiptWidth={receiptWidth}
+              defaultPrinter={defaultPrinter}
+              silentPrint={silentPrint}
+              receiptWidthStoreId={activeStoreId || ''}
+              receiptWidthStoreName={activeStore?.name || ''}
+              canEditReceiptWidth={Boolean(isAdmin && activeStoreId)}
+              isSavingReceiptWidth={isSavingReceiptWidth}
+              onReceiptWidthChange={handleSaveReceiptWidth}
+              onSavePrintSettings={handleSavePrintSettings}
+              onTestPrint={handleTestPrint}
+              channels={storedChannels}
+              successMessage={userSuccessMessage}
+              onDismissSuccess={() => setUserSuccessMessage('')}
+              usersList={usersList}
+              usersLoading={usersLoading}
+              pendingUsersCount={pendingUsersCount}
+              stores={stores}
+              storeNameById={storeNameById}
+              storeError={storeError}
+              isSavingStore={isSavingStore}
+              onOpenStoreModal={handleOpenStoreModal}
+              onStoreStatusChange={handleStoreStatusChange}
+              onAddUser={handleOpenAddUser}
+              onEditUser={handleOpenEditUser}
+              onDeleteUser={handleDeleteUser}
+            />
+          )}
+
+        </main>
+
+        {/* Footer */}
+        <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
+          POSKlean • Gestión de inventarios y punto de venta integral.
+        </footer>
+
+        {showChannelModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="channel-modal-title"
+              className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
                 <div>
-                  <p className="text-xs text-slate-400 font-medium">{isCajero ? 'Mis Tickets' : 'Tickets Registrados'}</p>
-                  <p className="text-2xl font-bold text-white font-mono">{visibleSalesHistory.length}</p>
+                  <h2 id="channel-modal-title" className="text-base font-bold text-white">¿Por qué canal es la venta?</h2>
+                  <p className="mt-1 text-xs text-slate-400">Puedes cambiarlo mientras armas el ticket.</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => { pendingProductRef.current = null; setShowChannelModal(false); }}
+                  aria-label="Cerrar"
+                  className="p-1 text-lg text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {salesChannelNames.map((channelName) => {
+                  const Icon = { Mostrador: Store, 'Uber Flash': Truck, WhatsApp: MessageSquare }[channelName] || Store;
+                  const color = { Mostrador: 'text-emerald-400', 'Uber Flash': 'text-amber-400', WhatsApp: 'text-green-400' }[channelName] || 'text-cyan-400';
+                  return (
+                    <button
+                      key={channelName}
+                      type="button"
+                      onClick={() => {
+                        const pending = pendingProductRef.current;
+                        pendingProductRef.current = null;
+                        setSelectedChannel(channelName);
+                        setShowChannelModal(false);
+                        if (pending) handleSelectProductToCart(pending, channelName);
+                      }}
+                      className={`flex flex-col items-center justify-center gap-2 rounded-xl border bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 ${selectedChannel === channelName ? 'border-cyan-500' : 'border-slate-700'
+                        }`}
+                    >
+                      <Icon className={`h-6 w-6 ${color}`} />
+                      <span>{channelName}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
+          </div>
+        )}
 
-            <section className="bg-slate-800 rounded-2xl border border-slate-700 p-4 shadow-md">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+        {showPaymentModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="payment-modal-title"
+              className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
                 <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <DollarSign className="w-5 h-5 text-cyan-400" />
-                    Resumen de ventas del día
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'long' })}
-                    {isCajero ? ' · Cierre personal' : ' · Cierre general'}
+                  <h2 id="payment-modal-title" className="text-base font-bold text-white">¿Cómo pagó el cliente?</h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Total a cobrar: <strong className="font-mono text-cyan-400">{formatCurrency(cartTotal)} MXN</strong>
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setTicketToPrint({
-                    type: 'cashClosure',
-                    data: {
-                      ...cashClosureSummary,
-                      date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
-                      closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
-                      closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
-                    },
-                  })}
-                  disabled={cashClosureSummary.tickets === 0}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setShowPaymentModal(false)}
+                  disabled={isSavingSale}
+                  aria-label="Cerrar"
+                  className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
                 >
-                  <Printer className="w-4 h-4" />
-                  Imprimir resumen
+                  ✕
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'cash', label: 'Efectivo', icon: Banknote, color: 'text-emerald-400' },
+                  { id: 'card', label: 'Tarjeta', icon: CreditCard, color: 'text-sky-400' },
+                  { id: 'transfer', label: 'Transferencia', icon: ArrowLeftRight, color: 'text-violet-400' },
+                ].map((method) => {
+                  const Icon = method.icon;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => handleCompleteSale(method.id)}
+                      disabled={isSavingSale}
+                      className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Icon className={`h-6 w-6 ${method.color}`} />
+                      <span>{method.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {isSavingSale && <p className="text-center text-xs text-slate-400">Procesando...</p>}
+              {actionError && (
+                <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">
+                  {actionError}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {cashShiftModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="cash-shift-modal-title"
+              className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+                <div>
+                  <h2 id="cash-shift-modal-title" className="text-base font-bold text-white">
+                    {cashShiftModal === 'open' ? 'Abrir turno de caja' : 'Cerrar turno y hacer cierre'}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {storeNameById.get(activeStoreId) || 'Tienda seleccionada'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCashShiftModal(null)}
+                  disabled={isSavingCashShift}
+                  aria-label="Cerrar"
+                  className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
+                >
+                  ✕
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
-                <div>
-                  <p className="text-xs text-slate-400">Ventas registradas</p>
-                  <p className="text-xl font-bold font-mono text-emerald-400">{formatCurrency(cashClosureSummary.total)} MXN</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Tickets</p>
-                  <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.tickets}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Litros despachados</p>
-                  <p className="text-xl font-bold font-mono text-white">{cashClosureSummary.liters.toFixed(2)} L</p>
-                  {cashClosureSummary.others.length > 0 && (
-                    <p className="text-xs text-slate-400 font-mono">+ {formatOtherUnits(cashClosureSummary.others)}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5 border-t border-slate-700 pt-3">
-                <div>
-                  <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por canal</p>
-                  {cashClosureSummary.channels.length === 0 ? (
-                    <p className="text-xs text-slate-500">Sin ventas registradas hoy.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {cashClosureSummary.channels.map(({ channel, tickets, total }) => (
-                        <div key={channel} className="flex justify-between gap-3 text-xs">
-                          <span className="text-slate-400">{channel} · {tickets} {tickets === 1 ? 'ticket' : 'tickets'}</span>
-                          <span className="font-mono font-semibold text-slate-200">{formatCurrency(total)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-slate-300 mb-2">Desglose por producto</p>
-                  {cashClosureSummary.products.length === 0 ? (
-                    <p className="text-xs text-slate-500">Sin productos vendidos hoy.</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                      {cashClosureSummary.products.map(({ key, name, unit, quantity, total }) => (
-                        <div key={key} className="flex justify-between gap-3 text-xs">
-                          <span className="text-slate-400 truncate">{name} · {quantity.toFixed(2)} {unit}</span>
-                          <span className="font-mono font-semibold text-slate-200 whitespace-nowrap">{formatCurrency(total)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* Sales Log Table */}
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-md">
-              <div className="p-4 border-b border-slate-700">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-cyan-400" />
-                    Historial de Transacciones Recientes
-                  </h2>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-700">
-                    <tr>
-                      <th className="px-4 py-3">Folio</th>
-                      <th className="px-4 py-3">Hora / Fecha</th>
-                      <th className="px-4 py-3">Canal</th>
-                      <th className="px-4 py-3">Pago</th>
-                      <th className="px-4 py-3">Vendedor</th>
-                      <th className="px-4 py-3">Detalle</th>
-                      <th className="px-4 py-3">Cantidad</th>
-                      <th className="px-4 py-3 text-right">Total ($ MXN)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/60">
-                    {visibleSalesHistory.map(sale => (
-                      <tr key={sale.id} className="hover:bg-slate-700/30 transition">
-                        <td className="px-4 py-3 font-mono font-bold text-cyan-400">{sale.ticketId}</td>
-                        <td className="px-4 py-3 text-slate-400">{sale.timestamp}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${sale.channel === 'Mostrador' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
-                            sale.channel === 'Uber Flash' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
-                              'bg-green-500/10 text-green-300 border-green-500/30'
-                            }`}>
-                            {sale.channel}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {sale.paymentMethod === 'cash' ? 'Efectivo'
-                            : sale.paymentMethod === 'card' ? 'Tarjeta'
-                              : sale.paymentMethod === 'transfer' ? 'Transferencia'
-                                : 'No registrado'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <User className="w-3 h-3 text-slate-500 shrink-0" />
-                            <span className="text-slate-200 font-medium truncate max-w-30">
-                              {sale.createdBy?.userName || 'Desconocido'}
-                            </span>
-                          </div>
-                          {sale.createdBy?.userRole && (
-                            <span className={`mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-semibold border ${sale.createdBy.userRole === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' :
-                              sale.createdBy.userRole === 'supervisor' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
-                                'bg-slate-500/15 text-slate-400 border-slate-500/30'
-                              }`}>
-                              {sale.createdBy.userRole === 'admin' ? 'Admin' :
-                                sale.createdBy.userRole === 'supervisor' ? 'Supervisor' :
-                                  sale.createdBy.userRole === 'cajero' ? 'Cajero' : sale.createdBy.userRole}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-slate-300 max-w-xs">
-                          {sale.items.map((it, idx) => (
-                            <span key={idx} className="block truncate">
-                              • {it.name}
-                            </span>
-                          ))}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-slate-300">
-                          {sale.items.map((it, idx) => (
-                            <span key={it.productId || `${it.name}-${idx}`} className="block truncate">
-                              • {it.qty} {it.unit || 'L'}
-                            </span>
-                          ))}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400 text-sm">
-                          <span>{formatCurrency(sale.total)}</span>
-                          <button
-                            type="button"
-                            onClick={() => setTicketToPrint({ type: 'sale', data: sale })}
-                            className="ml-3 inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-cyan-500 hover:text-slate-950"
-                          >
-                            <Printer className="h-3 w-3" />
-                            Imprimir Ticket
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
-        {visibleTab === 'users' && canAccessUsers && (
-          <AdminPanel
-            currentUser={currentUser}
-            isAdmin={isAdmin}
-            receiptWidth={receiptWidth}
-            defaultPrinter={defaultPrinter}
-            silentPrint={silentPrint}
-            receiptWidthStoreId={activeStoreId || ''}
-            receiptWidthStoreName={activeStore?.name || ''}
-            canEditReceiptWidth={Boolean(isAdmin && activeStoreId)}
-            isSavingReceiptWidth={isSavingReceiptWidth}
-            onReceiptWidthChange={handleSaveReceiptWidth}
-            onSavePrintSettings={handleSavePrintSettings}
-            onTestPrint={handleTestPrint}
-            channels={storedChannels}
-            successMessage={userSuccessMessage}
-            onDismissSuccess={() => setUserSuccessMessage('')}
-            usersList={usersList}
-            usersLoading={usersLoading}
-            pendingUsersCount={pendingUsersCount}
-            stores={stores}
-            storeNameById={storeNameById}
-            storeError={storeError}
-            isSavingStore={isSavingStore}
-            onOpenStoreModal={handleOpenStoreModal}
-            onStoreStatusChange={handleStoreStatusChange}
-            onAddUser={handleOpenAddUser}
-            onEditUser={handleOpenEditUser}
-            onDeleteUser={handleDeleteUser}
-          />
-        )}
-
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-slate-950 border-t border-slate-800 py-3 px-4 text-center text-xs text-slate-500">
-        POSKlean • Gestión de inventarios y punto de venta integral.
-      </footer>
-
-      {showChannelModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="channel-modal-title"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-              <div>
-                <h2 id="channel-modal-title" className="text-base font-bold text-white">¿Por qué canal es la venta?</h2>
-                <p className="mt-1 text-xs text-slate-400">Puedes cambiarlo mientras armas el ticket.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { pendingProductRef.current = null; setShowChannelModal(false); }}
-                aria-label="Cerrar"
-                className="p-1 text-lg text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {salesChannelNames.map((channelName) => {
-                const Icon = { Mostrador: Store, 'Uber Flash': Truck, WhatsApp: MessageSquare }[channelName] || Store;
-                const color = { Mostrador: 'text-emerald-400', 'Uber Flash': 'text-amber-400', WhatsApp: 'text-green-400' }[channelName] || 'text-cyan-400';
-                return (
-                  <button
-                    key={channelName}
-                    type="button"
-                    onClick={() => {
-                      const pending = pendingProductRef.current;
-                      pendingProductRef.current = null;
-                      setSelectedChannel(channelName);
-                      setShowChannelModal(false);
-                      if (pending) handleSelectProductToCart(pending, channelName);
-                    }}
-                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 ${selectedChannel === channelName ? 'border-cyan-500' : 'border-slate-700'
-                      }`}
-                  >
-                    <Icon className={`h-6 w-6 ${color}`} />
-                    <span>{channelName}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPaymentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="payment-modal-title"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-              <div>
-                <h2 id="payment-modal-title" className="text-base font-bold text-white">¿Cómo pagó el cliente?</h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Total a cobrar: <strong className="font-mono text-cyan-400">{formatCurrency(cartTotal)} MXN</strong>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPaymentModal(false)}
-                disabled={isSavingSale}
-                aria-label="Cerrar"
-                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'cash', label: 'Efectivo', icon: Banknote, color: 'text-emerald-400' },
-                { id: 'card', label: 'Tarjeta', icon: CreditCard, color: 'text-sky-400' },
-                { id: 'transfer', label: 'Transferencia', icon: ArrowLeftRight, color: 'text-violet-400' },
-              ].map((method) => {
-                const Icon = method.icon;
-                return (
-                  <button
-                    key={method.id}
-                    type="button"
-                    onClick={() => handleCompleteSale(method.id)}
-                    disabled={isSavingSale}
-                    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-2 py-4 text-xs font-medium text-slate-200 transition hover:border-cyan-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Icon className={`h-6 w-6 ${method.color}`} />
-                    <span>{method.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {isSavingSale && <p className="text-center text-xs text-slate-400">Procesando...</p>}
-            {actionError && (
-              <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-200">
-                {actionError}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {cashShiftModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cash-shift-modal-title"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-              <div>
-                <h2 id="cash-shift-modal-title" className="text-base font-bold text-white">
-                  {cashShiftModal === 'open' ? 'Abrir turno de caja' : 'Cerrar turno y hacer cierre'}
-                </h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  {storeNameById.get(activeStoreId) || 'Tienda seleccionada'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCashShiftModal(null)}
-                disabled={isSavingCashShift}
-                aria-label="Cerrar"
-                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
-              >
-                ✕
-              </button>
-            </div>
-
-            {cashShiftModal === 'open' ? (
-              <form onSubmit={handleOpenCashShift} className="space-y-4">
-                <p className="text-xs text-slate-300">
-                  Captura el efectivo que queda en caja al iniciar. Las ventas de turnos anteriores no se incluirán.
-                </p>
-                <div>
-                  <label htmlFor="opening-cash" className="mb-1 block text-xs font-medium text-slate-300">
-                    Fondo inicial (MXN)
-                  </label>
-                  <input
-                    id="opening-cash"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    required
-                    autoFocus
-                    value={openingCashDraft}
-                    onChange={(event) => setOpeningCashDraft(event.target.value)}
-                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
-                  />
-                </div>
-                {cashShiftActionError && (
-                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                    {cashShiftActionError}
-                  </p>
-                )}
-                <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setCashShiftModal(null)}
-                    disabled={isSavingCashShift}
-                    className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingCashShift}
-                    className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
-                  >
-                    {isSavingCashShift ? 'Abriendo...' : 'Abrir turno'}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={handleCloseCashShift} className="space-y-4">
-                <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs">
-                  <div className="flex justify-between gap-3 text-slate-300">
-                    <span>Fondo inicial</span>
-                    <strong className="font-mono">{formatCurrency((cashShift?.openingCashCents || 0) / 100)}</strong>
-                  </div>
-                  <div className="flex justify-between gap-3 text-slate-300">
-                    <span>Ventas en efectivo ({cashShift?.saleCount || 0} tickets totales)</span>
-                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.cash)}</strong>
-                  </div>
-                  <div className="flex justify-between gap-3 text-slate-300">
-                    <span>Ventas con tarjeta</span>
-                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.card)}</strong>
-                  </div>
-                  <div className="flex justify-between gap-3 text-slate-300">
-                    <span>Ventas por transferencia</span>
-                    <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.transfer)}</strong>
-                  </div>
-                  <div className="flex justify-between gap-3 border-t border-slate-700 pt-2 font-semibold text-white">
-                    <span>Efectivo esperado</span>
-                    <strong className="font-mono text-cyan-300">{formatCurrency(currentShiftExpectedCash)}</strong>
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="counted-cash" className="mb-1 block text-xs font-medium text-slate-300">
-                    Efectivo contado al cierre (MXN)
-                  </label>
-                  <input
-                    id="counted-cash"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    required
-                    autoFocus
-                    value={countedCashDraft}
-                    onChange={(event) => setCountedCashDraft(event.target.value)}
-                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
-                  />
-                </div>
-                {countedCashDraft !== '' && Number.isFinite(Number(countedCashDraft)) && (
+              {cashShiftModal === 'open' ? (
+                <form onSubmit={handleOpenCashShift} className="space-y-4">
                   <p className="text-xs text-slate-300">
-                    Diferencia estimada:{' '}
-                    <strong className={Number(countedCashDraft) - currentShiftExpectedCash === 0
-                      ? 'text-emerald-300'
-                      : 'text-amber-300'}
+                    Captura el efectivo que queda en caja al iniciar. Las ventas de turnos anteriores no se incluirán.
+                  </p>
+                  <div>
+                    <label htmlFor="opening-cash" className="mb-1 block text-xs font-medium text-slate-300">
+                      Fondo inicial (MXN)
+                    </label>
+                    <input
+                      id="opening-cash"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      required
+                      autoFocus
+                      value={openingCashDraft}
+                      onChange={(event) => setOpeningCashDraft(event.target.value)}
+                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
+                    />
+                  </div>
+                  {cashShiftActionError && (
+                    <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                      {cashShiftActionError}
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setCashShiftModal(null)}
+                      disabled={isSavingCashShift}
+                      className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
                     >
-                      {formatCurrency(Number(countedCashDraft) - currentShiftExpectedCash)}
-                    </strong>
-                  </p>
-                )}
-                {cashShiftActionError && (
-                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                    {cashShiftActionError}
-                  </p>
-                )}
-                <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setCashShiftModal(null)}
-                    disabled={isSavingCashShift}
-                    className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingCashShift}
-                    className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
-                  >
-                    {isSavingCashShift ? 'Cerrando...' : 'Guardar cierre'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {isStoreModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="store-modal-title"
-            className="my-8 w-full max-w-xl space-y-5 rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-              <h3 id="store-modal-title" className="flex items-center gap-2 text-base font-bold text-white">
-                <Store className="h-5 w-5 text-cyan-400" />
-                {editingStoreId ? 'Editar tienda' : 'Crear tienda'}
-              </h3>
-              <button
-                type="button"
-                onClick={handleCloseStoreModal}
-                disabled={isSavingStore}
-                aria-label="Cerrar"
-                className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
-              >
-                ✕
-              </button>
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingCashShift}
+                      className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+                    >
+                      {isSavingCashShift ? 'Abriendo...' : 'Abrir turno'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleCloseCashShift} className="space-y-4">
+                  <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs">
+                    <div className="flex justify-between gap-3 text-slate-300">
+                      <span>Fondo inicial</span>
+                      <strong className="font-mono">{formatCurrency((cashShift?.openingCashCents || 0) / 100)}</strong>
+                    </div>
+                    <div className="flex justify-between gap-3 text-slate-300">
+                      <span>Ventas en efectivo ({cashShift?.saleCount || 0} tickets totales)</span>
+                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.cash)}</strong>
+                    </div>
+                    <div className="flex justify-between gap-3 text-slate-300">
+                      <span>Ventas con tarjeta</span>
+                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.card)}</strong>
+                    </div>
+                    <div className="flex justify-between gap-3 text-slate-300">
+                      <span>Ventas por transferencia</span>
+                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.transfer)}</strong>
+                    </div>
+                    <div className="flex justify-between gap-3 border-t border-slate-700 pt-2 font-semibold text-white">
+                      <span>Efectivo esperado</span>
+                      <strong className="font-mono text-cyan-300">{formatCurrency(currentShiftExpectedCash)}</strong>
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="counted-cash" className="mb-1 block text-xs font-medium text-slate-300">
+                      Efectivo contado al cierre (MXN)
+                    </label>
+                    <input
+                      id="counted-cash"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      required
+                      autoFocus
+                      value={countedCashDraft}
+                      onChange={(event) => setCountedCashDraft(event.target.value)}
+                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
+                    />
+                  </div>
+                  {countedCashDraft !== '' && Number.isFinite(Number(countedCashDraft)) && (
+                    <p className="text-xs text-slate-300">
+                      Diferencia estimada:{' '}
+                      <strong className={Number(countedCashDraft) - currentShiftExpectedCash === 0
+                        ? 'text-emerald-300'
+                        : 'text-amber-300'}
+                      >
+                        {formatCurrency(Number(countedCashDraft) - currentShiftExpectedCash)}
+                      </strong>
+                    </p>
+                  )}
+                  {cashShiftActionError && (
+                    <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                      {cashShiftActionError}
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setCashShiftModal(null)}
+                      disabled={isSavingCashShift}
+                      className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingCashShift}
+                      className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
+                    >
+                      {isSavingCashShift ? 'Cerrando...' : 'Guardar cierre'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
+          </div>
+        )}
 
-            {needsFirstStore && !editingStoreId && (
-              <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-xs text-cyan-200">
-                Aún no hay tiendas registradas. Crea la primera para comenzar a usar el sistema.
-              </div>
-            )}
-
-            {storeError && (
-              <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs text-red-300">
-                {storeError}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveStore} className="space-y-4">
-              <div>
-                <label htmlFor="store-name" className="mb-1 block text-xs font-medium text-slate-300">
-                  Tienda: <span className="text-cyan-400">*</span>
-                </label>
-                <input
-                  id="store-name"
-                  required
-                  autoFocus
-                  type="text"
-                  value={storeForm.name}
-                  onChange={(event) => setStoreForm((previous) => ({ ...previous, name: event.target.value }))}
-                  placeholder="Nombre de la tienda"
-                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="store-address" className="mb-1 block text-xs font-medium text-slate-300">
-                  Dirección
-                </label>
-                <input
-                  id="store-address"
-                  type="text"
-                  value={storeForm.address}
-                  onChange={(event) => setStoreForm((previous) => ({ ...previous, address: event.target.value }))}
-                  placeholder="Dirección de la tienda"
-                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                />
-              </div>
-
-              <fieldset className="space-y-2">
-                <legend className="text-xs font-medium text-slate-300">Asignar cajeros</legend>
-                <p className="text-[11px] text-slate-400">
-                  {isEditingArchivedStore
-                    ? 'Reactiva esta tienda antes de asignarle cajeros.'
-                    : 'La selección reemplaza la asignación actual de esta tienda. Un cajero seleccionado se moverá aquí desde otra tienda.'}
-                </p>
-                <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
-                  {usersLoading ? (
-                    <p className="p-2 text-xs text-slate-500">Cargando cajeros...</p>
-                  ) : usersList.filter((user) => user.role === 'cajero').length === 0 ? (
-                    <p className="p-2 text-xs text-slate-500">No hay usuarios con rol de cajero.</p>
-                  ) : usersList
-                    .filter((user) => user.role === 'cajero')
-                    .map((cashier) => {
-                      const assignedElsewhere = cashier.storeId && cashier.storeId !== editingStoreId;
-                      const assignedStoreName = assignedElsewhere
-                        ? storeNameById.get(cashier.storeId) || 'otra tienda'
-                        : '';
-                      return (
-                        <label
-                          key={cashier.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                        >
-                          <input
-                            type="checkbox"
-                            disabled={isEditingArchivedStore}
-                            checked={storeForm.cashierIds.includes(cashier.id)}
-                            onChange={(event) => setStoreForm((previous) => ({
-                              ...previous,
-                              cashierIds: event.target.checked
-                                ? [...new Set([...previous.cashierIds, cashier.id])]
-                                : previous.cashierIds.filter((id) => id !== cashier.id),
-                            }))}
-                            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-400"
-                          />
-                          <span className="min-w-0 flex-1 truncate">
-                            {cashier.displayName || cashier.username || cashier.email || cashier.id}
-                          </span>
-                          <span className="shrink-0 text-[10px] text-slate-500">
-                            {assignedElsewhere ? `Asignado a ${assignedStoreName}` : cashier.status || ''}
-                          </span>
-                        </label>
-                      );
-                    })}
-                </div>
-              </fieldset>
-
-              <div>
-                <label htmlFor="store-phone" className="mb-1 block text-xs font-medium text-slate-300">
-                  Teléfono
-                </label>
-                <input
-                  id="store-phone"
-                  type="tel"
-                  value={storeForm.phone}
-                  onChange={(event) => setStoreForm((previous) => ({ ...previous, phone: event.target.value }))}
-                  placeholder="Teléfono de contacto"
-                  className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-slate-700 pt-4">
+        {isStoreModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="store-modal-title"
+              className="my-8 w-full max-w-xl space-y-5 rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+                <h3 id="store-modal-title" className="flex items-center gap-2 text-base font-bold text-white">
+                  <Store className="h-5 w-5 text-cyan-400" />
+                  {editingStoreId ? 'Editar tienda' : 'Crear tienda'}
+                </h3>
                 <button
                   type="button"
                   onClick={handleCloseStoreModal}
                   disabled={isSavingStore}
-                  className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  aria-label="Cerrar"
+                  className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingStore || usersLoading}
-                  className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
-                >
-                  {usersLoading ? 'Cargando cajeros...' : isSavingStore ? 'Guardando...' : editingStoreId ? 'Guardar cambios' : 'Crear tienda'}
+                  ✕
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
 
-      {/* Modal for Add / Edit User */}
-      {isUserModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto font-sans">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
-            <div className="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 className="font-bold text-white text-base flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-cyan-400" />
-                {editingUser ? 'Editar Usuario y Permisos' : 'Agregar Nuevo Usuario'}
-              </h3>
-              <button
-                type="button"
-                onClick={handleCloseUserModal}
-                className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {userFormError && (
-              <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs">
-                {userFormError}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveUser} className="space-y-4">
-              {/* Selector de Tipo de Cuenta: solo al editar; las cuentas nuevas son usuario/contraseña */}
-              {editingUser && (
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Tipo de Acceso / Autenticación:
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      disabled
-                      className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'credentials'
-                        ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
-                        : 'bg-slate-900 border-slate-700 text-slate-400'
-                        }`}
-                    >
-                      <User className="w-3.5 h-3.5" />
-                      <span>Usuario / Clave</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled
-                      className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'google'
-                        ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
-                        : 'bg-slate-900 border-slate-700 text-slate-400'
-                        }`}
-                    >
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Google</span>
-                    </button>
-                  </div>
+              {needsFirstStore && !editingStoreId && (
+                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-xs text-cyan-200">
+                  Aún no hay tiendas registradas. Crea la primera para comenzar a usar el sistema.
                 </div>
               )}
 
-              {userForm.authType === 'credentials' ? (
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Nombre de Usuario: <span className="text-cyan-400">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                      <User className="w-4 h-4" />
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Ej. cajero1"
-                      required
-                      disabled={Boolean(editingUser)}
-                      value={userForm.username}
-                      onChange={(e) => setUserForm(prev => ({ ...prev, username: e.target.value.toLowerCase() }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
-                    />
-                  </div>
-                  {editingUser && (
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      El nombre de usuario no puede cambiarse una vez creado.
-                    </p>
-                  )}
+              {storeError && (
+                <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/20 p-3 text-xs text-red-300">
+                  {storeError}
                 </div>
-              ) : (
+              )}
+
+              <form onSubmit={handleSaveStore} className="space-y-4">
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Correo Electrónico (Cuenta Google): <span className="text-cyan-400">*</span>
+                  <label htmlFor="store-name" className="mb-1 block text-xs font-medium text-slate-300">
+                    Tienda: <span className="text-cyan-400">*</span>
                   </label>
                   <input
-                    type="email"
-                    placeholder="ejemplo@gmail.com"
+                    id="store-name"
                     required
-                    disabled={Boolean(editingUser)}
-                    onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                    autoFocus
+                    type="text"
+                    value={storeForm.name}
+                    onChange={(event) => setStoreForm((previous) => ({ ...previous, name: event.target.value }))}
+                    placeholder="Nombre de la tienda"
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
                   />
-                  {editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL && (
-                    <p className="text-[11px] text-amber-400 mt-1">
-                      El correo del Administrador Principal no puede modificarse.
-                    </p>
-                  )}
                 </div>
-              )}
 
-              {!editingUser ? (
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Contraseña Inicial: <span className="text-cyan-400">*</span>
+                  <label htmlFor="store-address" className="mb-1 block text-xs font-medium text-slate-300">
+                    Dirección
                   </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
-                      <Key className="w-4 h-4" />
-                    </span>
-                    <input
-                      type="password"
-                      placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
-                      required
-                      minLength={MIN_PASSWORD_LENGTH}
-                      autoComplete="new-password"
-                      value={userForm.password}
-                      onChange={(e) => setUserForm(prev => ({ ...prev, password: e.target.value }))}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                    />
+                  <input
+                    id="store-address"
+                    type="text"
+                    value={storeForm.address}
+                    onChange={(event) => setStoreForm((previous) => ({ ...previous, address: event.target.value }))}
+                    placeholder="Dirección de la tienda"
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+
+                <fieldset className="space-y-2">
+                  <legend className="text-xs font-medium text-slate-300">Asignar cajeros</legend>
+                  <p className="text-[11px] text-slate-400">
+                    {isEditingArchivedStore
+                      ? 'Reactiva esta tienda antes de asignarle cajeros.'
+                      : 'La selección reemplaza la asignación actual de esta tienda. Un cajero seleccionado se moverá aquí desde otra tienda.'}
+                  </p>
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
+                    {usersLoading ? (
+                      <p className="p-2 text-xs text-slate-500">Cargando cajeros...</p>
+                    ) : usersList.filter((user) => user.role === 'cajero').length === 0 ? (
+                      <p className="p-2 text-xs text-slate-500">No hay usuarios con rol de cajero.</p>
+                    ) : usersList
+                      .filter((user) => user.role === 'cajero')
+                      .map((cashier) => {
+                        const assignedElsewhere = cashier.storeId && cashier.storeId !== editingStoreId;
+                        const assignedStoreName = assignedElsewhere
+                          ? storeNameById.get(cashier.storeId) || 'otra tienda'
+                          : '';
+                        return (
+                          <label
+                            key={cashier.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={isEditingArchivedStore}
+                              checked={storeForm.cashierIds.includes(cashier.id)}
+                              onChange={(event) => setStoreForm((previous) => ({
+                                ...previous,
+                                cashierIds: event.target.checked
+                                  ? [...new Set([...previous.cashierIds, cashier.id])]
+                                  : previous.cashierIds.filter((id) => id !== cashier.id),
+                              }))}
+                              className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-400"
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              {cashier.displayName || cashier.username || cashier.email || cashier.id}
+                            </span>
+                            <span className="shrink-0 text-[10px] text-slate-500">
+                              {assignedElsewhere ? `Asignado a ${assignedStoreName}` : cashier.status || ''}
+                            </span>
+                          </label>
+                        );
+                      })}
                   </div>
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500">
-                  La contraseña no puede verse ni cambiarse desde este panel. Si se olvida, crea un nuevo usuario.
-                </p>
-              )}
-
-              {/* Nombre Completo */}
-              <div>
-                <label className="text-xs text-slate-300 block mb-1 font-medium">
-                  Nombre Completo: <span className="text-cyan-400"></span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. Juan Pérez"
-                  //required
-                  value={userForm.displayName}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, displayName: e.target.value }))}
-                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                />
-              </div>
-
-              {/* Rol y Estado */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Rol Asignado:
-                  </label>
-                  <select
-                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                    value={userForm.role}
-                    onChange={(e) => handleRoleChangeInForm(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
-                  >
-                    <option value="admin">Administrador (Acceso Total)</option>
-                    <option value="supervisor">Supervisor (POS, Inv., Ventas)</option>
-                    <option value="cajero">Cajero (POS e Inv.)</option>
-                    <option value="custom">Personalizado (Manual)</option>
-                  </select>
-                </div>
+                </fieldset>
 
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Estado de la Cuenta:
+                  <label htmlFor="store-phone" className="mb-1 block text-xs font-medium text-slate-300">
+                    Teléfono
                   </label>
-                  <select
-                    disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                    value={userForm.status}
-                    onChange={(e) => setUserForm(prev => ({ ...prev, status: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                  <input
+                    id="store-phone"
+                    type="tel"
+                    value={storeForm.phone}
+                    onChange={(event) => setStoreForm((previous) => ({ ...previous, phone: event.target.value }))}
+                    placeholder="Teléfono de contacto"
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-slate-700 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleCloseStoreModal}
+                    disabled={isSavingStore}
+                    className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
                   >
-                    <option value="active">Activo (Permite acceso)</option>
-                    <option value="inactive">Inactivo (Acceso bloqueado)</option>
-                    <option value="pending">Pendiente (En revisión)</option>
-                  </select>
-                </div>
-              </div>
-
-              {userForm.role === 'cajero' && (
-                <div>
-                  <label className="text-xs text-slate-300 block mb-1 font-medium">
-                    Tienda asignada: <span className="text-cyan-400">*</span>
-                  </label>
-                  <select
-                    required
-                    value={userForm.storeId}
-                    onChange={(e) => setUserForm(prev => ({ ...prev, storeId: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingStore || usersLoading}
+                    className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
                   >
-                    <option value="">Selecciona una tienda</option>
-                    {activeStores.map((store) => (
-                      <option key={store.id} value={store.id}>{store.name}</option>
-                    ))}
-                    {userForm.storeId
-                      && !activeStores.some((store) => store.id === userForm.storeId)
-                      && stores.find((store) => store.id === userForm.storeId) && (
-                        <option value={userForm.storeId}>
-                          {stores.find((store) => store.id === userForm.storeId).name} (Archivada)
-                        </option>
-                      )}
-                  </select>
+                    {usersLoading ? 'Cargando cajeros...' : isSavingStore ? 'Guardando...' : editingStoreId ? 'Guardar cambios' : 'Crear tienda'}
+                  </button>
                 </div>
-              )}
+              </form>
+            </div>
+          </div>
+        )}
 
-              {/* Permisos Granulares */}
-              <div>
-                <label className="text-xs text-slate-300 block mb-2 font-medium">
-                  Permisos de Acceso al Sistema:
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-900/90 p-3.5 rounded-xl border border-slate-700/80">
-                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(userForm.permissions?.pos)}
-                      onChange={() => handlePermissionToggle('pos')}
-                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
-                    />
-                    <div>
-                      <p className="font-semibold text-white">Punto de Venta</p>
-                      <p className="text-[11px] text-slate-400">Despacho, cobro y tickets</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(userForm.permissions?.inventory)}
-                      onChange={() => handlePermissionToggle('inventory')}
-                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
-                    />
-                    <div>
-                      <p className="font-semibold text-white">Inventario</p>
-                      <p className="text-[11px] text-slate-400">Ver stock, resurtir y productos</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(userForm.permissions?.sales)}
-                      onChange={() => handlePermissionToggle('sales')}
-                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
-                    />
-                    <div>
-                      <p className="font-semibold text-white">Ventas y Reportes</p>
-                      <p className="text-[11px] text-slate-400">Historial y métricas de dinero</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(userForm.permissions?.users)}
-                      onChange={() => handlePermissionToggle('users')}
-                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
-                      className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
-                    />
-                    <div>
-                      <p className="font-semibold text-white">Gestión de Usuarios</p>
-                      <p className="text-[11px] text-slate-400">Administrar cuentas y roles</p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Botones del Modal */}
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-700">
+        {/* Modal for Add / Edit User */}
+        {isUserModalOpen && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto font-sans">
+            <div className="bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
+              <div className="flex justify-between items-center border-b border-slate-700 pb-3">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                  {editingUser ? 'Editar Usuario y Permisos' : 'Agregar Nuevo Usuario'}
+                </h3>
                 <button
                   type="button"
                   onClick={handleCloseUserModal}
-                  disabled={isSavingUser}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingUser}
-                  className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  {isSavingUser ? 'Guardando...' : editingUser ? 'Actualizar Usuario' : 'Crear Usuario'}
+                  ✕
                 </button>
               </div>
-            </form>
+
+              {userFormError && (
+                <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs">
+                  {userFormError}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveUser} className="space-y-4">
+                {/* Selector de Tipo de Cuenta: solo al editar; las cuentas nuevas son usuario/contraseña */}
+                {editingUser && (
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Tipo de Acceso / Autenticación:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled
+                        className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'credentials'
+                          ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                          }`}
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span>Usuario / Clave</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled
+                        className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50 ${userForm.authType === 'google'
+                          ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                          }`}
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Google</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {userForm.authType === 'credentials' ? (
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Nombre de Usuario: <span className="text-cyan-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                        <User className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Ej. cajero1"
+                        required
+                        disabled={Boolean(editingUser)}
+                        value={userForm.username}
+                        onChange={(e) => setUserForm(prev => ({ ...prev, username: e.target.value.toLowerCase() }))}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                      />
+                    </div>
+                    {editingUser && (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        El nombre de usuario no puede cambiarse una vez creado.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Correo Electrónico (Cuenta Google): <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="ejemplo@gmail.com"
+                      required
+                      disabled={Boolean(editingUser)}
+                      onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                    />
+                    {editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL && (
+                      <p className="text-[11px] text-amber-400 mt-1">
+                        El correo del Administrador Principal no puede modificarse.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!editingUser ? (
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Contraseña Inicial: <span className="text-cyan-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                        <Key className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="password"
+                        placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
+                        required
+                        minLength={MIN_PASSWORD_LENGTH}
+                        autoComplete="new-password"
+                        value={userForm.password}
+                        onChange={(e) => setUserForm(prev => ({ ...prev, password: e.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    La contraseña no puede verse ni cambiarse desde este panel. Si se olvida, crea un nuevo usuario.
+                  </p>
+                )}
+
+                {/* Nombre Completo */}
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1 font-medium">
+                    Nombre Completo: <span className="text-cyan-400"></span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Juan Pérez"
+                    //required
+                    value={userForm.displayName}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, displayName: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+
+                {/* Rol y Estado */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Rol Asignado:
+                    </label>
+                    <select
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      value={userForm.role}
+                      onChange={(e) => handleRoleChangeInForm(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                    >
+                      <option value="admin">Administrador (Acceso Total)</option>
+                      <option value="supervisor">Supervisor (POS, Inv., Ventas)</option>
+                      <option value="cajero">Cajero (POS e Inv.)</option>
+                      <option value="custom">Personalizado (Manual)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Estado de la Cuenta:
+                    </label>
+                    <select
+                      disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                      value={userForm.status}
+                      onChange={(e) => setUserForm(prev => ({ ...prev, status: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                    >
+                      <option value="active">Activo (Permite acceso)</option>
+                      <option value="inactive">Inactivo (Acceso bloqueado)</option>
+                      <option value="pending">Pendiente (En revisión)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {userForm.role === 'cajero' && (
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1 font-medium">
+                      Tienda asignada: <span className="text-cyan-400">*</span>
+                    </label>
+                    <select
+                      required
+                      value={userForm.storeId}
+                      onChange={(e) => setUserForm(prev => ({ ...prev, storeId: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="">Selecciona una tienda</option>
+                      {activeStores.map((store) => (
+                        <option key={store.id} value={store.id}>{store.name}</option>
+                      ))}
+                      {userForm.storeId
+                        && !activeStores.some((store) => store.id === userForm.storeId)
+                        && stores.find((store) => store.id === userForm.storeId) && (
+                          <option value={userForm.storeId}>
+                            {stores.find((store) => store.id === userForm.storeId).name} (Archivada)
+                          </option>
+                        )}
+                    </select>
+                  </div>
+                )}
+
+                {/* Permisos Granulares */}
+                <div>
+                  <label className="text-xs text-slate-300 block mb-2 font-medium">
+                    Permisos de Acceso al Sistema:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-900/90 p-3.5 rounded-xl border border-slate-700/80">
+                    <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(userForm.permissions?.pos)}
+                        onChange={() => handlePermissionToggle('pos')}
+                        disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                      />
+                      <div>
+                        <p className="font-semibold text-white">Punto de Venta</p>
+                        <p className="text-[11px] text-slate-400">Despacho, cobro y tickets</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(userForm.permissions?.inventory)}
+                        onChange={() => handlePermissionToggle('inventory')}
+                        disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                      />
+                      <div>
+                        <p className="font-semibold text-white">Inventario</p>
+                        <p className="text-[11px] text-slate-400">Ver stock, resurtir y productos</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(userForm.permissions?.sales)}
+                        onChange={() => handlePermissionToggle('sales')}
+                        disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                      />
+                      <div>
+                        <p className="font-semibold text-white">Ventas y Reportes</p>
+                        <p className="text-[11px] text-slate-400">Historial y métricas de dinero</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(userForm.permissions?.users)}
+                        onChange={() => handlePermissionToggle('users')}
+                        disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                      />
+                      <div>
+                        <p className="font-semibold text-white">Gestión de Usuarios</p>
+                        <p className="text-[11px] text-slate-400">Administrar cuentas y roles</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Botones del Modal */}
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={handleCloseUserModal}
+                    disabled={isSavingUser}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingUser}
+                    className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    {isSavingUser ? 'Guardando...' : editingUser ? 'Actualizar Usuario' : 'Crear Usuario'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       </div>
 
