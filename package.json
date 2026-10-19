@@ -25,6 +25,13 @@
   "build": {
     "appId": "com.posklean.app",
     "productName": "POSKlean",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jaet65",
+        "repo": "POSKlean"
+      }
+    ],
     "directories": {
       "buildResources": "build"
     },
@@ -37,6 +44,12 @@
       "target": "nsis",
       "icon": "build/icon.ico"
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    },
     "mac": {
       "target": "dmg",
       "icon": "build/icon.png"
@@ -46,6 +59,7 @@
     "@capacitor-firebase/authentication": "^8.5.2",
     "@capacitor/core": "^8.5.3",
     "@capgo/capacitor-printer": "^8.1.8",
+    "electron-updater": "^6.8.9",
     "firebase": "*",
     "lucide-react": "^1.56.0",
     "react": "^19.2.8",

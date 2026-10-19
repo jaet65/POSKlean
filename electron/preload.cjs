@@ -11,4 +11,12 @@ contextBridge.exposeInMainWorld('posNative', {
   toggleFullScreen: () => ipcRenderer.invoke('app-toggle-fullscreen'),
   isFullScreen: () => ipcRenderer.invoke('app-is-fullscreen'),
   shutdownSystem: () => ipcRenderer.invoke('app-shutdown-system'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  onUpdateStatus: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('updater-status', subscription);
+    return () => ipcRenderer.removeListener('updater-status', subscription);
+  },
 });

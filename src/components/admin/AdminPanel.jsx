@@ -5,14 +5,17 @@ import {
   CheckCircle,
   ChevronDown,
   ChevronRight,
+  Globe,
   Monitor,
   Printer,
   RefreshCw,
   ShieldCheck,
   Sliders,
+  Smartphone,
   Users,
   Zap,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { SUPER_ADMIN_EMAIL } from '../../services/userService';
 import ChannelsPanel from '../ChannelsPanel';
 import StoresSection from './StoresSection';
@@ -72,6 +75,13 @@ export default function AdminPanel({
   const [isTesting, setIsTesting] = useState(false);
 
   const isElectron = Boolean(window?.posNative?.isElectron || window?.posNative?.exitApp);
+  const isCapacitor = Boolean(Capacitor?.isNativePlatform?.());
+  const isStandalone = typeof window !== 'undefined' && (
+    Boolean(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+    Boolean(navigator?.standalone || document?.referrer?.includes('android-app://'))
+  );
+  const isPWA = !isElectron && !isCapacitor;
+  const capacitorPlatform = isCapacitor ? (Capacitor.getPlatform() === 'android' ? 'Android' : Capacitor.getPlatform() === 'ios' ? 'iOS' : 'Nativo') : '';
 
   const canManageChannels = isAdmin || currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
   const adminCount = usersList.filter((user) => user.role === 'admin' || user.email === SUPER_ADMIN_EMAIL).length;
@@ -217,7 +227,17 @@ export default function AdminPanel({
                 Configuración de impresión
                 {isElectron && (
                   <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    <Monitor className="w-3 h-3" /> Electron
+                    <Monitor className="w-3 h-3" /> PC
+                  </span>
+                )}
+                {isCapacitor && (
+                  <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                    <Smartphone className="w-3 h-3" /> Mobile {capacitorPlatform}
+                  </span>
+                )}
+                {isPWA && (
+                  <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                    <Globe className="w-3 h-3" /> {isStandalone ? 'PWA' : 'WEB'}
                   </span>
                 )}
               </span>
@@ -261,15 +281,13 @@ export default function AdminPanel({
                     aria-checked={silentPrintDraft}
                     onClick={() => setSilentPrintDraft(!silentPrintDraft)}
                     disabled={!canEditReceiptWidth || isSavingReceiptWidth}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                      silentPrintDraft ? 'bg-cyan-500' : 'bg-slate-700'
-                    }`}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${silentPrintDraft ? 'bg-cyan-500' : 'bg-slate-700'
+                      }`}
                   >
                     <span
                       aria-hidden="true"
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
-                        silentPrintDraft ? 'translate-x-5 bg-white' : 'translate-x-0 bg-slate-300'
-                      }`}
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${silentPrintDraft ? 'translate-x-5 bg-white' : 'translate-x-0 bg-slate-300'
+                        }`}
                     />
                   </button>
                 </div>
@@ -401,11 +419,10 @@ export default function AdminPanel({
                         onClick={() => setReceiptWidthDraft(String(width))}
                         disabled={!canEditReceiptWidth || isSavingReceiptWidth}
                         aria-pressed={Number(receiptWidthDraft) === width}
-                        className={`flex-1 rounded-lg border py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                          Number(receiptWidthDraft) === width
-                            ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200 shadow-sm'
-                            : 'border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-700'
-                        }`}
+                        className={`flex-1 rounded-lg border py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${Number(receiptWidthDraft) === width
+                          ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200 shadow-sm'
+                          : 'border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-700'
+                          }`}
                       >
                         {width} mm
                       </button>

@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { exec } = require('node:child_process');
 const http = require('node:http');
 const fs = require('node:fs');
@@ -416,9 +417,102 @@ ipcMain.handle('app-shutdown-system', () => {
   app.quit();
 });
 
+// ==================== AUTO UPDATER ====================
+function sendUpdaterStatus(data) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    mainWindow.webContents.send('updater-status', data);
+  }
+}
+
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('checking-for-update', () => {
+  sendUpdaterStatus({ status: 'checking' });
+});
+
+autoUpdater.on('update-available', (info) => {
+  sendUpdaterStatus({ status: 'available', version: info?.version });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  sendUpdaterStatus({ status: 'not-available', version: info?.version });
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('Error en autoUpdater:', err);
+  sendUpdaterStatus({ status: 'error', message: err?.message || 'Error desconocido al actualizar' });
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  sendUpdaterStatus({
+    status: 'downloading',
+    percent: Math.round(progressObj.percent || 0),
+    transferred: progressObj.transferred,
+    total: progressObj.total,
+    bytesPerSecond: progressObj.bytesPerSecond,
+  });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  sendUpdaterStatus({ status: 'downloaded', version: info?.version });
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['Reiniciar y actualizar ahora', 'Instalar al cerrar'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Actualización descargada',
+      message: `La versión ${info?.version || ''} de POSKlean ya está lista para instalar.`,
+      detail: '¿Deseas reiniciar la aplicación ahora para aplicar la nueva versión?',
+    }).then(({ response }) => {
+      if (response === 0) {
+        isQuitting = true;
+        autoUpdater.quitAndInstall(false, true);
+      }
+    }).catch(() => {});
+  }
+});
+
+// Comprobar actualizaciones manualmente
+ipcMain.handle('check-for-updates', async () => {
+  if (!app.isPackaged) {
+    return { ok: false, message: 'Actualizaciones deshabilitadas en desarrollo' };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { ok: true, updateInfo: result?.updateInfo };
+  } catch (err) {
+    return { ok: false, error: err?.message };
+  }
+});
+
+// Aplicar e instalar actualización descargada
+ipcMain.handle('install-update', () => {
+  isQuitting = true;
+  autoUpdater.quitAndInstall(false, true);
+  return true;
+});
+
 app.whenReady().then(() => {
   registerGlobalKioskShortcuts();
   createWindow();
+
+  // Buscar actualizaciones automáticamente tras iniciar la aplicación (en producción)
+  if (app.isPackaged) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.error('Error al chequear actualizaciones al inicio:', err);
+      });
+    }, 4000);
+
+    // Revisar periódicamente cada 60 minutos
+    setInterval(() => {
+      autoUpdater.checkForUpdates().catch(() => {});
+    }, 60 * 60 * 1000);
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

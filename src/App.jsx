@@ -39,6 +39,8 @@ import {
   Menu as MenuIcon,
   Power,
   Loader2,
+  RefreshCw,
+  ArrowDownCircle,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Printer as NativePrinter } from '@capgo/capacitor-printer';
@@ -128,6 +130,16 @@ export default function App() {
     }
   };
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
+  const [updateState, setUpdateState] = useState(null);
+
+  useEffect(() => {
+    if (window?.posNative?.onUpdateStatus) {
+      const unsubscribe = window.posNative.onUpdateStatus((status) => {
+        setUpdateState(status);
+      });
+      return () => unsubscribe();
+    }
+  }, []);
   const [stores, setStores] = useState([]);
   const [storesLoaded, setStoresLoaded] = useState(false);
   const hasPromptedFirstStore = useRef(false);
@@ -1780,6 +1792,23 @@ export default function App() {
                   </span>
                 );
               })()}
+              {updateState?.status === 'downloading' && (
+                <span className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 animate-pulse">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Descargando v{updateState.version || ''} ({updateState.percent || 0}%)
+                </span>
+              )}
+              {updateState?.status === 'downloaded' && (
+                <button
+                  type="button"
+                  onClick={() => window?.posNative?.installUpdate?.()}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition animate-bounce cursor-pointer"
+                  title="Haz clic para reiniciar e instalar la nueva versión"
+                >
+                  <ArrowDownCircle className="w-3.5 h-3.5" />
+                  Actualizar a v{updateState.version}
+                </button>
+              )}
             </h1>
           </div>
         </div>
