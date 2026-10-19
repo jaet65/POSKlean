@@ -163,6 +163,8 @@ async function createWindow() {
     },
   });
 
+let isPrintingDialogActive = false;
+
   mainWindow = win;
 
   // Aplicar bloqueo de teclas directamente a la ventana
@@ -170,14 +172,14 @@ async function createWindow() {
 
   // Evitar que la ventana pierda el foco si está en modo kiosko activo
   win.on('blur', () => {
-    if (!isQuitting && isKioskActive) {
+    if (!isQuitting && isKioskActive && !isPrintingDialogActive) {
       // Si hay una ventana hija o de autenticación abierta (ej. popup de Google), no robarle el foco
       const childWindows = win.getChildWindows();
       if (childWindows && childWindows.length > 0) return;
       if (BrowserWindow.getAllWindows().length > 1) return;
 
       setImmediate(() => {
-        if (!win.isDestroyed()) {
+        if (!win.isDestroyed() && !isPrintingDialogActive) {
           win.focus();
         }
       });
@@ -359,6 +361,8 @@ const handlePrintAction = async (webContents, options = {}) => {
   const isPdfPrinter = deviceName.toLowerCase().includes('pdf');
   const effectiveSilent = isSilent && !isPdfPrinter;
 
+  const targetWindow = BrowserWindow.fromWebContents(webContents) || mainWindow;
+
   return new Promise((resolve) => {
     const printOptions = {
       silent: effectiveSilent,
@@ -377,7 +381,21 @@ const handlePrintAction = async (webContents, options = {}) => {
       printOptions.margins = options.margins;
     }
 
+    // Si NO es silent, se abrirá el diálogo nativo de impresión de Windows.
+    // Debemos quitar temporalmente alwaysOnTop para que la ventana del sistema pueda recibir clics y foco.
+    if (!effectiveSilent && targetWindow && !targetWindow.isDestroyed()) {
+      isPrintingDialogActive = true;
+      targetWindow.setAlwaysOnTop(false);
+    }
+
     webContents.print(printOptions, (success, reason) => {
+      if (!effectiveSilent && targetWindow && !targetWindow.isDestroyed()) {
+        isPrintingDialogActive = false;
+        if (isKioskActive) {
+          targetWindow.setAlwaysOnTop(!process.env.ELECTRON_DEV);
+          targetWindow.focus();
+        }
+      }
       resolve({ success, reason: reason || null });
     });
   });
