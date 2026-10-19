@@ -14,7 +14,7 @@ const round2 = (value) => Math.round(value * 100) / 100;
 
 // Mueve existencias entre tiendas en una sola transacción: descuenta en el origen,
 // suma en el destino (lo habilita si hace falta) y registra ambos movimientos.
-export async function transferInventory({ sourceStockId, destStoreId, amount, user }) {
+export async function transferInventory({ sourceStockId, destStoreId, amount, user, transferId: providedTransferId }) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if (user?.role !== 'admin' && user?.role !== 'supervisor') {
     throw new Error('Solo administradores y supervisores pueden transferir inventario.');
@@ -27,10 +27,18 @@ export async function transferInventory({ sourceStockId, destStoreId, amount, us
 
   const sourceRef = doc(db, 'stockItems', sourceStockId);
   const author = userInfo(user);
-  const transferId = doc(collection(db, 'inventoryMovements')).id;
+  const transferId = providedTransferId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : doc(collection(db, 'inventoryMovements')).id);
+  const outMovementRef = doc(db, 'inventoryMovements', `transfer-${transferId}-out`);
+  const inMovementRef = doc(db, 'inventoryMovements', `transfer-${transferId}-in`);
 
-  await runTransaction(db, async (transaction) => {
-    const sourceSnapshot = await transaction.get(sourceRef);
+  return runTransaction(db, async (transaction) => {
+    const [sourceSnapshot, existingOutMovement] = await Promise.all([
+      transaction.get(sourceRef),
+      transaction.get(outMovementRef),
+    ]);
+    if (existingOutMovement.exists()) {
+      return { transferId, alreadyProcessed: true };
+    }
     if (!sourceSnapshot.exists()) throw new Error('El producto de origen ya no existe.');
     const source = sourceSnapshot.data();
     if (source.storeId === destStoreId) throw new Error('El origen y el destino deben ser distintos.');
@@ -56,7 +64,7 @@ export async function transferInventory({ sourceStockId, destStoreId, amount, us
     };
 
     transaction.update(sourceRef, { currentStock: sourceNewStock });
-    transaction.set(doc(collection(db, 'inventoryMovements')), {
+    transaction.set(outMovementRef, {
       ...movementBase,
       type: 'transfer_out',
       productId: sourceRef.id,
@@ -87,7 +95,7 @@ export async function transferInventory({ sourceStockId, destStoreId, amount, us
         createdAt: serverTimestamp(),
       });
     }
-    transaction.set(doc(collection(db, 'inventoryMovements')), {
+    transaction.set(inMovementRef, {
       ...movementBase,
       type: 'transfer_in',
       productId: destRef.id,
@@ -98,5 +106,7 @@ export async function transferInventory({ sourceStockId, destStoreId, amount, us
       storeId: destStoreId,
       counterpartStoreId: source.storeId,
     });
+
+    return { transferId, success: true };
   });
 }

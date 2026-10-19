@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeftRight,
   CheckCircle,
   ClipboardCheck,
@@ -29,6 +30,7 @@ export default function InventoryTable({
   deletingProductId,
   editingMinStockProductId,
   editingPriceProductId,
+  filterLowStock = false,
   inventoryTableProducts,
   isAdmin,
   isCajero,
@@ -36,6 +38,7 @@ export default function InventoryTable({
   isSavingMinStock,
   isSavingPrice,
   isStoreManager,
+  lowStockCount = 0,
   minStockDraft,
   onCancelMinStock,
   onCancelPrice,
@@ -51,6 +54,7 @@ export default function InventoryTable({
   onPriceDraftChange,
   onSaveMinStock,
   onSavePrice,
+  onToggleFilterLowStock,
   priceDraft,
   products,
   storeNameById,
@@ -61,13 +65,18 @@ export default function InventoryTable({
       .map((product) => (typeof product.category === 'string' ? product.category.trim() : ''))
       .filter(Boolean),
   )], [products]);
-  const filteredProducts = useMemo(() => (
-    selectedCategory === 'Todos'
-      ? inventoryTableProducts
-      : inventoryTableProducts.filter((product) => (
+  const filteredProducts = useMemo(() => {
+    let list = inventoryTableProducts;
+    if (filterLowStock) {
+      list = list.filter((product) => product.currentStock <= product.minStock);
+    }
+    if (selectedCategory !== 'Todos') {
+      list = list.filter((product) => (
         typeof product.category === 'string' && product.category.trim() === selectedCategory
-      ))
-  ), [inventoryTableProducts, selectedCategory]);
+      ));
+    }
+    return list;
+  }, [inventoryTableProducts, filterLowStock, selectedCategory]);
 
   useEffect(() => {
     if (selectedCategory !== 'Todos' && !categories.includes(selectedCategory)) {
@@ -118,22 +127,65 @@ export default function InventoryTable({
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-700 px-4 py-3">
-        {['Todos', ...categories].map((category) => (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-1 overflow-x-auto">
+          {['Todos', ...categories].map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => setSelectedCategory(category)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+                selectedCategory === category
+                  ? 'bg-slate-700 text-cyan-400 border border-cyan-500/30 font-semibold'
+                  : 'bg-slate-900 text-slate-400 hover:bg-slate-700/50'
+              }`}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+
+        {onToggleFilterLowStock && (
           <button
-            key={category}
             type="button"
-            onClick={() => setSelectedCategory(category)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition ${
-              selectedCategory === category
-                ? 'bg-slate-700 text-cyan-400 border border-cyan-500/30'
-                : 'bg-slate-900 text-slate-400 hover:bg-slate-700/50'
+            onClick={onToggleFilterLowStock}
+            className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer border ${
+              filterLowStock
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm ring-1 ring-amber-500/30'
+                : 'bg-slate-900 text-slate-400 border-slate-700/60 hover:border-amber-500/40 hover:text-amber-300'
             }`}
+            title={filterLowStock ? 'Mostrar todos los productos' : 'Filtrar solo productos con bajo stock'}
           >
-            {category}
+            <AlertTriangle className={`w-3.5 h-3.5 ${filterLowStock ? 'text-amber-400' : 'text-slate-400'}`} />
+            <span>Solo bajo stock</span>
+            {lowStockCount > 0 && (
+              <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                filterLowStock ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-amber-400 border border-slate-700'
+              }`}>
+                {lowStockCount}
+              </span>
+            )}
           </button>
-        ))}
+        )}
       </div>
+
+      {filterLowStock && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>Filtrando por <strong>Bajo Stock</strong> (stock actual ≤ mínimo).</span>
+          </div>
+          {onToggleFilterLowStock && (
+            <button
+              type="button"
+              onClick={onToggleFilterLowStock}
+              className="text-amber-200 underline hover:text-white font-semibold cursor-pointer"
+            >
+              Mostrar todos
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs text-slate-300">
@@ -174,7 +226,22 @@ export default function InventoryTable({
             ) : filteredProducts.length === 0 ? (
               <tr>
                 <td colSpan={isCajero ? 6 : 7} className="px-4 py-10 text-center text-slate-400">
-                  No hay productos en esta categoría.
+                  {filterLowStock ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p>No hay productos con bajo stock en {selectedCategory === 'Todos' ? 'el inventario' : `la categoría "${selectedCategory}"`}.</p>
+                      {onToggleFilterLowStock && (
+                        <button
+                          type="button"
+                          onClick={onToggleFilterLowStock}
+                          className="text-cyan-400 hover:underline font-semibold"
+                        >
+                          Ver todos los productos
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    'No hay productos en esta categoría.'
+                  )}
                 </td>
               </tr>
             ) : filteredProducts.map((product, index) => {

@@ -27,15 +27,25 @@ export async function openCashShift({ storeId, user, openingCash, shiftId }) {
   const shiftRef = shiftId ? doc(db, 'cashShifts', shiftId) : doc(collection(db, 'cashShifts'));
   const cashier = userInfo(user);
 
-  await runTransaction(db, async (transaction) => {
-    const [registerSnapshot, storeSnapshot] = await Promise.all([
+  return runTransaction(db, async (transaction) => {
+    const [registerSnapshot, storeSnapshot, shiftSnapshot] = await Promise.all([
       transaction.get(registerRef),
       transaction.get(storeRef),
+      transaction.get(shiftRef),
     ]);
+    if (shiftSnapshot.exists()) {
+      // Idempotency: este turno ya existe en Firestore
+      return {
+        ...shiftSnapshot.data(),
+        id: shiftRef.id,
+        shiftId: shiftRef.id,
+        alreadyOpened: true,
+      };
+    }
     if (!storeSnapshot.exists() || storeSnapshot.data().status === 'archived') {
       throw new Error('No se puede abrir un turno en una tienda archivada o inexistente.');
     }
-    if (registerSnapshot.exists() && registerSnapshot.data().status === 'open') {
+    if (registerSnapshot.exists() && registerSnapshot.data().status === 'open' && registerSnapshot.data().shiftId !== shiftRef.id) {
       throw new Error('Ya tienes un turno abierto. Ciérralo antes de abrir otro.');
     }
     const openCashShiftCount = storeSnapshot.data().openCashShiftCount ?? 0;
@@ -64,6 +74,16 @@ export async function openCashShift({ storeId, user, openingCash, shiftId }) {
       status: 'open',
       updatedAt: openedAt,
     });
+
+    return {
+      id: shiftRef.id,
+      shiftId: shiftRef.id,
+      cashierId,
+      storeId,
+      status: 'open',
+      openingCashCents: Math.round(openingCash * 100),
+      openedBy: cashier,
+    };
   });
 
   return {
@@ -100,8 +120,25 @@ export async function closeCashShift({ shiftId, storeId, user, countedCash }) {
       transaction.get(registerRef),
       transaction.get(storeRef),
     ]);
-    if (!shiftSnapshot.exists() || shiftSnapshot.data().status !== 'open') {
-      throw new Error('El turno ya fue cerrado o no existe.');
+    if (!shiftSnapshot.exists()) {
+      throw new Error('El turno no existe.');
+    }
+    if (shiftSnapshot.data().status === 'closed') {
+      // Idempotency: este turno ya fue cerrado previamente
+      const closedData = shiftSnapshot.data();
+      const closedDate = closedData.closedAt?.toDate ? closedData.closedAt.toDate() : null;
+      return {
+        ...closedData,
+        id: shiftId,
+        alreadyClosed: true,
+        timestamp: closedDate
+          ? closedDate.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+          : new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
+        timestampMs: closedData.closedAt?.toMillis ? closedData.closedAt.toMillis() : Date.now(),
+      };
+    }
+    if (shiftSnapshot.data().status !== 'open') {
+      throw new Error('El turno no está abierto.');
     }
     if (!registerSnapshot.exists()
       || registerSnapshot.data().status !== 'open'

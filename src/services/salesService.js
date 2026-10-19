@@ -9,7 +9,16 @@ import { createPurchaseRequest } from './purchaseService';
 
 const roundToCents = (value) => Number(value.toFixed(2));
 
-export async function createSale({ cart, channel, paymentMethod, shiftId, user, storeId }) {
+export async function createSale({
+  cart,
+  channel,
+  paymentMethod,
+  shiftId,
+  user,
+  storeId,
+  saleId,
+  ticketId: clientTicketId,
+}) {
   if (!db) {
     throw new Error('No se puede registrar la venta: configura primero Firebase.');
   }
@@ -40,8 +49,9 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
     );
   }
 
-  const saleRef = doc(collection(db, 'sales'));
-  const ticketId = `VTA-${saleRef.id.slice(0, 8).toUpperCase()}`;
+  const finalSaleId = saleId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : doc(collection(db, 'sales')).id);
+  const saleRef = doc(db, 'sales', finalSaleId);
+  const ticketId = clientTicketId || `VTA-${finalSaleId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
   const productRefs = [...quantitiesByProduct.keys()].map((id) => doc(db, 'stockItems', id));
   const shiftRef = doc(db, 'cashShifts', shiftId);
   const registerRef = doc(db, 'cashRegisters', cashierId);
@@ -54,6 +64,24 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
   };
 
   const saleResult = await runTransaction(db, async (transaction) => {
+    // Verificación de idempotencia: si la venta ya fue registrada previamente, se retorna intacta
+    const existingSaleSnapshot = await transaction.get(saleRef);
+    if (existingSaleSnapshot.exists()) {
+      const existing = existingSaleSnapshot.data();
+      const existingDate = existing.timestamp?.toDate ? existing.timestamp.toDate() : null;
+      return {
+        ...existing,
+        id: saleRef.id,
+        ticketId: existing.ticketId || ticketId,
+        timestamp: existingDate
+          ? existingDate.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
+          : new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
+        timestampMs: existing.timestamp?.toMillis ? existing.timestamp.toMillis() : Date.now(),
+        alreadyProcessed: true,
+        restockCandidates: [],
+      };
+    }
+
     const [shiftSnapshot, registerSnapshot] = await Promise.all([
       transaction.get(shiftRef),
       transaction.get(registerRef),
@@ -162,8 +190,8 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
     saleItems.forEach((item, index) => {
       transaction.update(productRefs[index], { currentStock: item.newStock });
 
-      // Registrar movimiento de inventario por venta (salida)
-      const movementRef = doc(collection(db, 'inventoryMovements'));
+      // Registrar movimiento de inventario por venta (salida) con ID determinista
+      const movementRef = doc(db, 'inventoryMovements', `sale-${saleRef.id}-${item.productId}`);
       transaction.set(movementRef, {
         type: 'sale',
         productId: item.productId,
@@ -203,10 +231,13 @@ export async function createSale({ cart, channel, paymentMethod, shiftId, user, 
     };
   });
 
-  const { restockCandidates, ...result } = saleResult;
+  const { restockCandidates = [], alreadyProcessed = false, ...result } = saleResult;
   // Un fallo aquí (p. ej. proveedor inactivo) no debe afectar la venta ya registrada.
-  await Promise.allSettled(restockCandidates.map(({ product, supplierId, qtyRequested, storeId: requestStore }) => (
-    createPurchaseRequest({ storeId: requestStore, product, supplierId, qtyRequested, user })
-  )));
+  // Y si la venta ya había sido procesada (retry idempotente), evitamos duplicar solicitudes de compra.
+  if (!alreadyProcessed && restockCandidates.length > 0) {
+    await Promise.allSettled(restockCandidates.map(({ product, supplierId, qtyRequested, storeId: requestStore }) => (
+      createPurchaseRequest({ storeId: requestStore, product, supplierId, qtyRequested, user })
+    )));
+  }
   return result;
 }

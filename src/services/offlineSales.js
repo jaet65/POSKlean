@@ -1,18 +1,29 @@
 import { createSale } from './salesService';
 import { closeCashShift, openCashShift } from './cashShiftService';
+import { transferInventory } from './transferService';
+import { completeInventoryAudit } from './inventoryService';
 import {
+  clearPendingQueue,
+  countPendingOperations,
+  countPendingSales,
+  enqueuePendingOperation,
   enqueuePendingSale,
+  generateUUID,
+  listPendingOperations,
   listPendingSales,
+  removePendingOperation,
   removePendingSale,
+  updatePendingOperation,
   updatePendingSale,
 } from './offlineQueue';
 
 const LOCAL_SHIFT_KEY = 'posklean-local-shift';
 
-const isConnectivityError = (error) => (
+export const isConnectivityError = (error) => (
   error?.code === 'unavailable'
   || error?.code === 'deadline-exceeded'
-  || /offline|network|Failed to get document/i.test(error?.message || '')
+  || error?.code === 'failed-precondition' && /offline|network/i.test(error?.message || '')
+  || /offline|network|Failed to get document|client is offline|network-request-failed/i.test(error?.message || '')
 );
 
 const plainUser = (user) => ({
@@ -34,8 +45,8 @@ export function getLocalShift() {
   }
 }
 
-const setLocalShift = (shift) => localStorage.setItem(LOCAL_SHIFT_KEY, JSON.stringify(shift));
-const clearLocalShift = () => localStorage.removeItem(LOCAL_SHIFT_KEY);
+export const setLocalShift = (shift) => localStorage.setItem(LOCAL_SHIFT_KEY, JSON.stringify(shift));
+export const clearLocalShift = () => localStorage.removeItem(LOCAL_SHIFT_KEY);
 
 const typeOf = (entry) => entry.type || 'sale';
 
@@ -43,10 +54,11 @@ const typeOf = (entry) => entry.type || 'sale';
 export function sumPendingSales(entries, shiftId) {
   const paymentTotalsCents = { cash: 0, card: 0, transfer: 0 };
   let saleCount = 0;
-  for (const entry of entries) {
-    if (typeOf(entry) !== 'sale' || entry.error || entry.payload.shiftId !== shiftId) continue;
-    const cents = Math.round(entry.payload.cart.reduce((sum, item) => sum + item.total, 0) * 100);
-    paymentTotalsCents[entry.payload.paymentMethod] += cents;
+  for (const entry of entries || []) {
+    if (typeOf(entry) !== 'sale' || entry.error || entry.payload?.shiftId !== shiftId) continue;
+    const cents = Math.round((entry.payload.cart || []).reduce((sum, item) => sum + item.total, 0) * 100);
+    const method = entry.payload.paymentMethod || 'cash';
+    paymentTotalsCents[method] = (paymentTotalsCents[method] || 0) + cents;
     saleCount += 1;
   }
   return { paymentTotalsCents, saleCount };
@@ -54,7 +66,7 @@ export function sumPendingSales(entries, shiftId) {
 
 const hasPendingOps = async () => (await listPendingSales()).some((entry) => !entry.error);
 
-// Ejecuta la acción en línea solo si no hay operaciones previas en cola, para preservar el orden.
+// Ejecuta la acción en línea solo si no hay operaciones previas en cola, para preservar el orden FIFO.
 async function tryOnline(action) {
   if (!navigator.onLine || await hasPendingOps()) return { done: false };
   try {
@@ -65,22 +77,44 @@ async function tryOnline(action) {
   }
 }
 
-const afterEnqueue = () => { if (navigator.onLine) flushPendingSales(); };
+const afterEnqueue = () => {
+  if (navigator.onLine) {
+    flushPendingSales().catch(() => {});
+  }
+};
 
+/**
+ * Registra una venta de forma resiliente e idempotente.
+ * Genera un UUIDv4 en el cliente para garantizar que reintentos o reconexiones no dupliquen la venta.
+ */
 export async function createSaleResilient(payload) {
-  const online = await tryOnline(() => createSale(payload));
+  const saleId = payload.saleId || generateUUID();
+  const ticketId = payload.ticketId || `VTA-${saleId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
+  const preparedPayload = {
+    ...payload,
+    saleId,
+    ticketId,
+  };
+
+  const online = await tryOnline(() => createSale(preparedPayload));
   if (online.done) return online.value;
 
-  const entry = await enqueuePendingSale(payload, 'sale');
+  await enqueuePendingSale(preparedPayload, 'sale', saleId);
   afterEnqueue();
-  const total = payload.cart.reduce((sum, item) => sum + item.total, 0);
+  const total = preparedPayload.cart.reduce((sum, item) => sum + item.total, 0);
   return {
-    id: entry.localId,
-    ticketId: `OFF-${entry.localId.slice(-6).toUpperCase()}`,
-    channel: payload.channel,
-    paymentMethod: payload.paymentMethod,
-    items: payload.cart.map(({ id, name, unit, qty, price, total: itemTotal }) => ({
-      productId: id, name, unit: unit || 'L', qty, price, total: itemTotal,
+    id: saleId,
+    saleId,
+    ticketId,
+    channel: preparedPayload.channel,
+    paymentMethod: preparedPayload.paymentMethod,
+    items: preparedPayload.cart.map(({ id, name, unit, qty, price, total: itemTotal }) => ({
+      productId: id,
+      name,
+      unit: unit || 'L',
+      qty,
+      price,
+      total: itemTotal,
     })),
     total: Number(total.toFixed(2)),
     timestamp: nowLabel(),
@@ -89,16 +123,27 @@ export async function createSaleResilient(payload) {
   };
 }
 
-export async function openCashShiftResilient({ storeId, user, openingCash }) {
-  const online = await tryOnline(() => openCashShift({ storeId, user, openingCash }));
-  if (online.done) return online.value;
-
+/**
+ * Apertura de turno resiliente con ID UUIDv4 idempotente.
+ */
+export async function openCashShiftResilient({ storeId, user, openingCash, shiftId: providedShiftId }) {
+  const shiftId = providedShiftId || `shift-${generateUUID()}`;
   const cashierId = user?.id || user?.uid;
   if (!cashierId || !storeId || !Number.isFinite(openingCash) || openingCash < 0) {
     throw new Error('Selecciona una tienda válida e inicia sesión para abrir el turno.');
   }
-  const shiftId = `local-${crypto.randomUUID()}`;
-  await enqueuePendingSale({ storeId, user: plainUser(user), openingCash, shiftId }, 'openShift');
+
+  const preparedPayload = {
+    storeId,
+    user: plainUser(user),
+    openingCash,
+    shiftId,
+  };
+
+  const online = await tryOnline(() => openCashShift(preparedPayload));
+  if (online.done) return online.value;
+
+  await enqueuePendingSale(preparedPayload, 'openShift', shiftId);
   const shift = {
     id: shiftId,
     shiftId,
@@ -115,40 +160,102 @@ export async function openCashShiftResilient({ storeId, user, openingCash }) {
   return shift;
 }
 
+/**
+ * Cierre de turno resiliente e idempotente.
+ */
 export async function closeCashShiftResilient({ shift, storeId, user, countedCash }) {
-  const online = await tryOnline(() => closeCashShift({
-    shiftId: shift.id, storeId, user, countedCash,
-  }));
-  if (online.done) return online.value;
-
   if (!Number.isFinite(countedCash) || countedCash < 0) {
     throw new Error('El efectivo contado debe ser un monto válido, positivo o cero, con máximo dos decimales.');
   }
-  // `shift` ya incluye las ventas pendientes (ver mezcla en App), no se suman de nuevo.
+
+  const preparedPayload = {
+    shiftId: shift.id,
+    storeId,
+    user: plainUser(user),
+    countedCash,
+  };
+
+  const online = await tryOnline(() => closeCashShift(preparedPayload));
+  if (online.done) return online.value;
+
   const countedCashCents = Math.round(countedCash * 100);
-  const expectedCashCents = shift.openingCashCents + shift.paymentTotalsCents.cash;
+  const expectedCashCents = (shift.openingCashCents || 0) + (shift.paymentTotalsCents?.cash || 0);
   const closed = {
     ...shift,
     status: 'closed',
     countedCashCents,
     expectedCashCents,
     cashDifferenceCents: countedCashCents - expectedCashCents,
-    closedBy: { userId: user?.id || user?.uid || null, userName: user?.displayName || user?.username || user?.email || 'Desconocido' },
+    closedBy: {
+      userId: user?.id || user?.uid || null,
+      userName: user?.displayName || user?.username || user?.email || 'Desconocido',
+    },
     timestamp: nowLabel(),
     timestampMs: Date.now(),
     localOnly: true,
   };
-  await enqueuePendingSale({
-    shiftId: shift.id, storeId, user: plainUser(user), countedCash,
-  }, 'closeShift');
+
+  await enqueuePendingSale(preparedPayload, 'closeShift', `close-${shift.id}`);
   setLocalShift(closed);
   afterEnqueue();
   return closed;
 }
 
+/**
+ * Transferencia multitienda de inventario resiliente e idempotente.
+ */
+export async function transferInventoryResilient(payload) {
+  const transferId = payload.transferId || generateUUID();
+  const preparedPayload = {
+    ...payload,
+    user: plainUser(payload.user),
+    transferId,
+  };
+
+  const online = await tryOnline(() => transferInventory(preparedPayload));
+  if (online.done) return online.value;
+
+  await enqueuePendingSale(preparedPayload, 'transfer', `transfer-${transferId}`);
+  afterEnqueue();
+  return {
+    transferId,
+    pendingSync: true,
+  };
+}
+
+/**
+ * Auditoría y ajuste de inventario resiliente e idempotente.
+ */
+export async function completeInventoryAuditResilient(payload) {
+  const auditId = payload.auditId || generateUUID();
+  const ticketId = payload.ticketId || `AUD-${auditId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
+  const preparedPayload = {
+    ...payload,
+    user: plainUser(payload.user),
+    auditId,
+    ticketId,
+  };
+
+  const online = await tryOnline(() => completeInventoryAudit(preparedPayload));
+  if (online.done) return online.value;
+
+  await enqueuePendingSale(preparedPayload, 'audit', `audit-${auditId}`);
+  afterEnqueue();
+  return {
+    auditId,
+    ticketId,
+    storeId: payload.storeId,
+    pendingSync: true,
+  };
+}
+
 let flushing = false;
 
-// Reenvía en orden las operaciones pendientes; se detiene si vuelve a caer la conexión.
+/**
+ * Procesa la cola de operaciones pendientes en orden FIFO estricto.
+ * Gracias a los IDs idempotentes (UUIDv4), cualquier operación que ya hubiera alcanzado
+ * Firestore durante una intermitencia de red no se duplicará.
+ */
 export async function flushPendingSales() {
   if (flushing || !navigator.onLine) return { synced: 0, failed: 0 };
   flushing = true;
@@ -156,30 +263,62 @@ export async function flushPendingSales() {
   let failed = 0;
   try {
     for (const entry of await listPendingSales()) {
-      if (entry.error) { failed += 1; continue; }
+      if (entry.error) {
+        failed += 1;
+        continue;
+      }
       try {
         const type = typeOf(entry);
-        if (type === 'openShift') await openCashShift(entry.payload);
-        else if (type === 'closeShift') await closeCashShift(entry.payload);
-        else await createSale(entry.payload);
+        if (type === 'openShift') {
+          await openCashShift(entry.payload);
+        } else if (type === 'closeShift') {
+          await closeCashShift(entry.payload);
+        } else if (type === 'transfer') {
+          await transferInventory(entry.payload);
+        } else if (type === 'audit') {
+          await completeInventoryAudit(entry.payload);
+        } else {
+          await createSale(entry.payload);
+        }
         await removePendingSale(entry.localId);
         synced += 1;
       } catch (error) {
-        if (isConnectivityError(error)) break;
-        await updatePendingSale({ ...entry, error: error.message || 'Error desconocido' });
+        if (isConnectivityError(error)) {
+          // Si vuelve a fallar la conexión, pausamos el flush para reanudar luego
+          break;
+        }
+        await updatePendingSale({
+          ...entry,
+          error: error.message || 'Error desconocido al sincronizar',
+          failedAt: Date.now(),
+          retries: (entry.retries || 0) + 1,
+        });
         failed += 1;
       }
     }
-    // Sin operaciones pendientes, el turno local ya está reflejado en Firestore.
-    if (!(await hasPendingOps())) clearLocalShift();
+    // Si no quedan operaciones pendientes, limpiar el turno local
+    if (!(await hasPendingOps())) {
+      clearLocalShift();
+    }
   } finally {
     flushing = false;
   }
   return { synced, failed };
 }
 
-export async function countPendingSales() {
-  return (await listPendingSales()).filter((entry) => !entry.error).length;
-}
+export const flushOfflineQueue = flushPendingSales;
 
-export { listPendingSales };
+export {
+  clearPendingQueue,
+  countPendingOperations,
+  countPendingSales,
+  enqueuePendingOperation,
+  enqueuePendingSale,
+  generateUUID,
+  listPendingOperations,
+  listPendingSales,
+  removePendingOperation,
+  removePendingSale,
+  updatePendingOperation,
+  updatePendingSale,
+};

@@ -50,21 +50,20 @@ import { useCashShift } from './hooks/useCashShift';
 import {
   deleteProduct as removeProduct,
   updateProductMinStock as saveMinStock,
-  completeInventoryAudit as saveInventoryAudit,
 } from './services/inventoryService';
 import {
   closeCashShiftResilient,
+  completeInventoryAuditResilient as saveInventoryAuditResilient,
   createSaleResilient,
   flushPendingSales,
   getLocalShift,
   listPendingSales,
   openCashShiftResilient,
   sumPendingSales,
+  transferInventoryResilient,
 } from './services/offlineSales';
 import { createPurchaseRequest, subscribeToPurchaseRequests } from './services/purchaseService';
 import { setStorePriceOverride } from './services/catalogService';
-import { transferInventory } from './services/transferService';
-import { closeCashShift, openCashShift } from './services/cashShiftService';
 import {
   DEFAULT_PERMISSIONS,
   MIN_PASSWORD_LENGTH,
@@ -253,6 +252,7 @@ export default function App() {
   const [isInventoryHistoryOpen, setIsInventoryHistoryOpen] = useState(false);
   const [inventoryTargetStoreId, setInventoryTargetStoreId] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('all');
+  const [inventoryFilterLowStock, setInventoryFilterLowStock] = useState(false);
   const [isInventoryAuditOpen, setIsInventoryAuditOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const [transferForm, setTransferForm] = useState({ sourceStoreId: '', stockId: '', destStoreId: '', amount: '' });
@@ -1053,12 +1053,13 @@ export default function App() {
     setIsTransferring(true);
     setTransferError('');
     try {
-      await transferInventory({
+      await transferInventoryResilient({
         sourceStockId: source.id,
         destStoreId: transferForm.destStoreId,
         amount,
         user: currentUser,
       });
+      refreshOffline();
       setIsTransferOpen(false);
       setAddProductSuccess(`Transferencia de "${source.name}" a ${storeNameById.get(transferForm.destStoreId) || 'la tienda destino'} completada.`);
       setTimeout(() => setAddProductSuccess(''), 4000);
@@ -1106,7 +1107,7 @@ export default function App() {
     setInventoryAuditError('');
     setIsSavingInventoryAudit(true);
     try {
-      const result = await saveInventoryAudit({
+      const result = await saveInventoryAuditResilient({
         counts: inventoryProductsForEdit.map((product) => ({
           productId: product.id,
           countedStock: Number(inventoryAuditCounts[product.id]),
@@ -1114,6 +1115,7 @@ export default function App() {
         user: currentUser,
         storeId: isGeneralView ? inventoryTargetStoreId : activeStoreId,
       });
+      refreshOffline();
       setInventoryAuditResult(result);
     } catch (error) {
       setInventoryAuditError(error.message || 'No se pudo completar la auditoría.');
@@ -1873,13 +1875,23 @@ export default function App() {
 
           {/* Global Quick Metrics & User Info */}
           <div className="flex min-w-0 max-w-full basis-full flex-wrap lg:flex-1 lg:basis-0 items-center gap-2.5 [&>*]:max-w-full [&_select]:min-w-0 lg:justify-end lg:gap-3">
-            <div className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold ${lowStockCount > 0
+            <button
+              type="button"
+              onClick={() => {
+                if (canAccessInventory) {
+                  setInventoryFilterLowStock(true);
+                  setActiveTab('inventory');
+                }
+              }}
+              title={canAccessInventory ? 'Abrir inventario y filtrar artículos con bajo stock' : undefined}
+              className={`flex h-11 items-center gap-2 border px-2.5 rounded-xl text-xs font-semibold transition cursor-pointer hover:bg-amber-500/20 active:scale-95 ${lowStockCount > 0
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
                 : 'hidden'
-              }`}>
+              }`}
+            >
               <AlertTriangle className="w-4 h-4" />
               <span>{lowStockCount > 0 ? `${lowStockCount} Bajo Stock` : ''}</span>
-            </div>
+            </button>
 
             {isStoreManager && (
               <label className="flex h-11 items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-2.5 rounded-xl text-xs">
@@ -1963,28 +1975,6 @@ export default function App() {
                     </button>
                   </>
                 )}
-              </div>
-            )}
-
-            {canAccessInventory && lowStockCount > 0 && (
-              <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-200">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                <div className="min-w-0">
-                  <p className="text-xs font-bold">Alerta: stock mínimo alcanzado</p>
-                  <p className="mt-1 text-[10px] text-amber-100/80">
-                    {lowStockProducts.slice(0, 3).map((product) =>
-                      `${product.name}: ${product.currentStock} de ${product.minStock} ${product.unit}`
-                    ).join(' · ')}
-                    {lowStockCount > 3 && ` · y ${lowStockCount - 3} productos más`}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('inventory')}
-                  className="shrink-0 rounded-lg border border-amber-500/40 px-2 py-1 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-500/15"
-                >
-                  Ver inventario
-                </button>
               </div>
             )}
 
@@ -2356,15 +2346,26 @@ export default function App() {
                 )}
 
                 {lowStockCount > 0 && (
-                  <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setInventoryFilterLowStock((prev) => !prev)}
+                    className={`p-4 rounded-2xl border flex items-center gap-3 transition text-left cursor-pointer ${
+                      inventoryFilterLowStock
+                        ? 'bg-amber-500/15 border-amber-500/50 ring-2 ring-amber-500/30'
+                        : 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                    }`}
+                    title={inventoryFilterLowStock ? 'Quitar filtro de bajo stock' : 'Filtrar solo productos con bajo stock'}
+                  >
                     <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
                       <AlertTriangle className="w-6 h-6" />
                     </div>
                     <div>
-                      <p className="text-xs text-slate-400 font-medium">Productos por Resurtir</p>
+                      <p className="text-xs text-slate-400 font-medium">
+                        {inventoryFilterLowStock ? 'Filtrando: Bajo Stock' : 'Productos por Resurtir'}
+                      </p>
                       <p className="text-2xl font-bold text-amber-400 font-mono">{lowStockCount}</p>
                     </div>
-                  </div>
+                  </button>
                 )}
 
                 <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex items-center gap-3">
@@ -2383,6 +2384,7 @@ export default function App() {
                 deletingProductId={deletingProductId}
                 editingMinStockProductId={editingMinStockProductId}
                 editingPriceProductId={editingPriceProductId}
+                filterLowStock={inventoryFilterLowStock}
                 inventoryTableProducts={inventoryTableProducts}
                 isAdmin={isAdmin}
                 isCajero={isCajero}
@@ -2390,6 +2392,7 @@ export default function App() {
                 isSavingMinStock={isSavingMinStock}
                 isSavingPrice={isSavingPrice}
                 isStoreManager={isStoreManager}
+                lowStockCount={lowStockCount}
                 minStockDraft={minStockDraft}
                 onCancelMinStock={() => setEditingMinStockProductId(null)}
                 onCancelPrice={() => setEditingPriceProductId(null)}
@@ -2411,6 +2414,7 @@ export default function App() {
                 onPriceDraftChange={setPriceDraft}
                 onSaveMinStock={handleSaveMinStock}
                 onSavePrice={handleSavePrice}
+                onToggleFilterLowStock={() => setInventoryFilterLowStock((prev) => !prev)}
                 priceDraft={priceDraft}
                 products={products}
                 storeNameById={storeNameById}

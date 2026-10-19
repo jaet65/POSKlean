@@ -1,6 +1,11 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  getFirestore,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -26,7 +31,21 @@ const app = firebaseConfigError
     ? getApp()
     : initializeApp(firebaseConfig);
 
-export const db = app ? getFirestore(app) : null;
+function initFirestore(firebaseApp) {
+  if (!firebaseApp) return null;
+  try {
+    return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch (error) {
+    console.warn('Persistent cache initialization fell back to getFirestore:', error?.message || error);
+    return getFirestore(firebaseApp);
+  }
+}
+
+export const db = initFirestore(app);
 export const auth = app ? getAuth(app) : null;
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({

@@ -238,12 +238,18 @@ export async function completeInventoryAudit({ counts, user = null, storeId = nu
     userEmail: user.email || '',
     userRole: user.role,
   };
-  const auditId = doc(collection(db, 'inventoryMovements')).id;
-  const ticketId = `AUD-${auditId.slice(0, 8).toUpperCase()}`;
+  const auditId = providedAuditId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : doc(collection(db, 'inventoryMovements')).id);
+  const ticketId = providedTicketId || `AUD-${auditId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
   const productRefs = normalizedCounts.map(({ productId }) => doc(db, 'stockItems', productId));
-  const movementRefs = normalizedCounts.map(() => doc(collection(db, 'inventoryMovements')));
+  const movementRefs = normalizedCounts.map(({ productId }) => doc(db, 'inventoryMovements', `audit-${auditId}-${productId}`));
 
   return runTransaction(db, async (transaction) => {
+    if (movementRefs.length > 0) {
+      const firstMovementSnapshot = await transaction.get(movementRefs[0]);
+      if (firstMovementSnapshot.exists()) {
+        return { auditId, ticketId, storeId, alreadyProcessed: true };
+      }
+    }
     const snapshots = await Promise.all(productRefs.map((productRef) => transaction.get(productRef)));
     const catalogSnapshots = await Promise.all(snapshots.map((snapshot) => (
       snapshot.exists() ? transaction.get(doc(db, 'catalogProducts', snapshot.data().catalogId)) : null
