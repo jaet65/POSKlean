@@ -132,15 +132,11 @@ export default function App() {
   };
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
   const [updateState, setUpdateState] = useState(null);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   useEffect(() => {
     if (window?.posNative?.onUpdateStatus) {
       const unsubscribe = window.posNative.onUpdateStatus((status) => {
         setUpdateState(status);
-        if (status?.status === 'downloaded') {
-          setShowUpdateModal(true);
-        }
       });
       return () => unsubscribe();
     }
@@ -1863,11 +1859,12 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleTriggerUpdate}
-                    className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition animate-bounce cursor-pointer"
-                    title="Haz clic para descargar e instalar la nueva versión"
+                    className="group relative flex items-center gap-1.5 text-xs font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500 hover:text-white transition-all shadow-sm cursor-pointer"
+                    title={updateState?.platform === 'android' ? 'Descargar e instalar actualización' : 'Reiniciar ahora para aplicar actualización'}
                   >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 group-hover:bg-white animate-ping" />
                     <ArrowDownCircle className="w-3.5 h-3.5" />
-                    Actualizar
+                    <span>Actualizar {updateState?.version ? `(v${updateState.version})` : ''}</span>
                   </button>
                 )}
               </h1>
@@ -4018,41 +4015,6 @@ export default function App() {
         onToggleFullScreen={handleToggleFullScreen}
         onShutdownSystem={handleShutdownSystem}
       />
-
-      {showUpdateModal && updateState?.status === 'downloaded' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-6 text-center shadow-2xl space-y-4">
-            <div className="mx-auto w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <ArrowDownCircle className="w-7 h-7" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-white">¡Actualización lista!</h3>
-              <p className="text-xs text-slate-300 mt-1">
-                Se ha descargado la versión <span className="font-mono text-cyan-400 font-semibold">v{updateState.version}</span> de POSKlean.
-              </p>
-              <p className="text-[11px] text-slate-400 mt-2">
-                ¿Deseas reiniciar la aplicación ahora para instalar la nueva versión?
-              </p>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowUpdateModal(false)}
-                className="flex-1 rounded-xl border border-slate-600 bg-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 transition cursor-pointer"
-              >
-                Más tarde
-              </button>
-              <button
-                type="button"
-                onClick={handleTriggerUpdate}
-                className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow-lg shadow-emerald-600/30 cursor-pointer"
-              >
-                Reiniciar y actualizar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

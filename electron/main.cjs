@@ -18,10 +18,14 @@ const MIME = {
   '.ico': 'image/x-icon', '.woff2': 'font/woff2',
 };
 
+let httpServer = null;
+let serverUrl = null;
+let isQuitting = false;
+
 // Firebase Auth rechaza file://; localhost es un dominio autorizado por defecto.
 function startStaticServer() {
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
+    httpServer = http.createServer((req, res) => {
       const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
       let filePath = path.join(DIST_DIR, pathname === '/' ? 'index.html' : pathname);
       if (!filePath.startsWith(DIST_DIR)) { res.writeHead(403).end(); return; }
@@ -31,13 +35,10 @@ function startStaticServer() {
       res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
       fs.createReadStream(filePath).pipe(res);
     });
-    server.on('error', reject);
-    server.listen(PROD_PORT, '127.0.0.1', () => resolve(`http://localhost:${PROD_PORT}`));
+    httpServer.on('error', reject);
+    httpServer.listen(PROD_PORT, '127.0.0.1', () => resolve(`http://localhost:${PROD_PORT}`));
   });
 }
-
-let serverUrl = null;
-let isQuitting = false;
 
 function blockKioskShortcuts(window) {
   if (!window || window.isDestroyed()) return;
@@ -391,10 +392,17 @@ ipcMain.handle('print-silent', (event, options) => handlePrintAction(event.sende
 // Cierre/apagado ordenado de la aplicación desde el modo kiosko
 ipcMain.handle('app-exit', () => {
   isQuitting = true;
-  // Si en 1.5s no ha terminado el cierre ordenado, forzar salida del proceso
-  setTimeout(() => {
-    app.exit(0);
-  }, 1200).unref();
+  try {
+    globalShortcut.unregisterAll();
+    if (httpServer) {
+      httpServer.close();
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.destroy();
+    }
+  } catch (err) {
+    console.error('Error cerrando recursos:', err);
+  }
   app.quit();
 });
 
@@ -543,7 +551,21 @@ ipcMain.handle('check-for-updates', async () => {
 // Aplicar e instalar actualización descargada
 ipcMain.handle('install-update', () => {
   isQuitting = true;
-  autoUpdater.quitAndInstall(false, true);
+  try {
+    globalShortcut.unregisterAll();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setKiosk(false);
+      mainWindow.setFullScreen(false);
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.destroy();
+    }
+  } catch (err) {
+    console.error('Error preparando ventana para actualización:', err);
+  }
+  // isSilent = false (permite ver progreso/UAC), isForceRunAfter = true (reinicia app automáticamente tras instalar)
+  setImmediate(() => {
+    autoUpdater.quitAndInstall(false, true);
+  });
   return true;
 });
 
