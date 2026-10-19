@@ -126,7 +126,13 @@ function registerGlobalKioskShortcuts() {
 
 // Asegurar que cualquier ventana creada aplique las restricciones
 app.on('browser-window-created', (event, createdWin) => {
-  blockKioskShortcuts(createdWin);
+  if (createdWin !== mainWindow) {
+    // Es una ventana emergente / popup (ej. login con Google)
+    createdWin.setKiosk(false);
+    createdWin.setFullScreen(false);
+  } else {
+    blockKioskShortcuts(createdWin);
+  }
 });
 
 app.on('before-quit', () => {
@@ -164,6 +170,11 @@ async function createWindow() {
   // Evitar que la ventana pierda el foco si está en modo kiosko activo
   win.on('blur', () => {
     if (!isQuitting && isKioskActive) {
+      // Si hay una ventana hija o de autenticación abierta (ej. popup de Google), no robarle el foco
+      const childWindows = win.getChildWindows();
+      if (childWindows && childWindows.length > 0) return;
+      if (BrowserWindow.getAllWindows().length > 1) return;
+
       setImmediate(() => {
         if (!win.isDestroyed()) {
           win.focus();
@@ -180,7 +191,36 @@ async function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url) && !url.includes('web.app') && !url.includes('accounts.google.com')) {
+    // Permitir popups de autenticación OAuth de Firebase y Google
+    const isAuthUrl = (
+      url.includes('firebaseapp.com') ||
+      url.includes('web.app') ||
+      url.includes('accounts.google.com') ||
+      url.includes('google.com/accounts') ||
+      url.includes('apis.google.com') ||
+      url.includes('/__/auth/')
+    );
+
+    if (isAuthUrl) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 680,
+          autoHideMenuBar: true,
+          modal: true,
+          parent: win,
+          alwaysOnTop: !process.env.ELECTRON_DEV,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+          },
+        },
+      };
+    }
+
+    if (/^https?:/.test(url)) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
