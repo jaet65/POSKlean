@@ -148,20 +148,37 @@ export async function updateStore(storeId, details) {
   return saveStoreDetails({ ...details, storeId });
 }
 
-export async function updateStoreReceiptWidth(storeId, receiptWidth) {
+export async function updateStorePrintSettings(storeId, settings = {}) {
   if (!db) throw new Error('Firestore no está inicializado.');
   if (typeof storeId !== 'string' || !storeId.trim()) {
     throw new Error('Selecciona una tienda válida.');
   }
-  if (typeof receiptWidth !== 'number' || !Number.isFinite(receiptWidth)
-    || receiptWidth < 30 || receiptWidth > 120) {
-    throw new Error('El ancho del ticket debe estar entre 30 y 120 mm.');
+
+  const payload = {
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (settings.receiptWidth !== undefined) {
+    const width = Number(settings.receiptWidth);
+    if (!Number.isFinite(width) || width < 30 || width > 120) {
+      throw new Error('El ancho del ticket debe estar entre 30 y 120 mm.');
+    }
+    payload.receiptWidth = width;
   }
 
-  await updateDoc(doc(db, 'stores', storeId), {
-    receiptWidth,
-    updatedAt: new Date().toISOString(),
-  });
+  if (settings.defaultPrinter !== undefined) {
+    payload.defaultPrinter = typeof settings.defaultPrinter === 'string' ? settings.defaultPrinter.trim() : '';
+  }
+
+  if (settings.silentPrint !== undefined) {
+    payload.silentPrint = Boolean(settings.silentPrint);
+  }
+
+  await updateDoc(doc(db, 'stores', storeId), payload);
+}
+
+export async function updateStoreReceiptWidth(storeId, receiptWidth) {
+  return updateStorePrintSettings(storeId, { receiptWidth });
 }
 
 export async function updateStoreStatus(storeId, status) {

@@ -13,6 +13,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
   if (!ticket) return null;
 
   const { type, data } = ticket;
+  const effectiveWidth = Number(data?.receiptWidth || receiptWidth || 80);
   const countLines = (field) => data.lines.filter((line) => Number(line[field]) > 0).length;
   const shortageLabel = type === 'audit' ? countLines('shortage') : '';
   const surplusLabel = type === 'audit' ? countLines('surplus') : '';
@@ -20,7 +21,7 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
   return (
     <section
       className="print-ticket"
-      style={{ '--receipt-width': `${receiptWidth}mm` }}
+      style={{ '--receipt-width': `${effectiveWidth}mm` }}
       aria-label={`Ticket de ${type === 'sale' ? 'venta' : type === 'audit' ? 'auditoría' : type === 'purchaseOrder' ? 'orden de compra' : 'cierre'} para imprimir`}
     >
       <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
@@ -289,6 +290,23 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
           </div>
           <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
           <p style={{ textAlign: 'center' }}>Cierre registrado por {data.closedBy?.userName || 'Desconocido'}</p>
+        </>
+      )}
+
+      {type === 'test' && (
+        <>
+          <p className="receipt-thanks"><strong>PRUEBA DE IMPRESIÓN</strong></p>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+          <div className="receipt-item"><span>Tienda</span><strong>{stores.find((store) => store.id === data.storeId)?.name || data.storeName || 'POSKlean'}</strong></div>
+          <div className="receipt-item"><span>Fecha</span><strong>{data.timestamp || 'Fecha actual'}</strong></div>
+          <div className="receipt-item"><span>Impresora</span><strong>{data.silent ? (data.printerName || 'Predeterminada') : 'Selección en diálogo'}</strong></div>
+          <div className="receipt-item"><span>Modo</span><strong>{data.silent ? 'Silenciosa (Directa)' : 'Con Diálogo'}</strong></div>
+          <div className="receipt-item"><span>Ancho</span><strong>{effectiveWidth} mm</strong></div>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+          <p style={{ textAlign: 'center', fontSize: '0.85em', margin: '4px 0' }}>
+            ¡La impresora y el gestor de impresión están configurados correctamente!
+          </p>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
         </>
       )}
 

@@ -78,10 +78,12 @@ import {
 import {
   addStore as saveStore,
   subscribeToStores,
-  updateStoreReceiptWidth as saveStoreReceiptWidth,
+  updateStorePrintSettings as saveStorePrintSettings,
   updateStore as saveStoreUpdate,
   updateStoreStatus as saveStoreStatus,
 } from './services/storeService';
+import { getLocalPrintSettings, saveLocalPrintSettings } from './utils/printSettings';
+import { formatTicketToText } from './utils/ticketFormatter';
 
 const INITIAL_USER_FORM = {
   authType: 'credentials', // 'credentials' | 'google'
@@ -113,6 +115,16 @@ export default function App() {
   const handleExitApp = () => {
     if (window?.posNative?.exitApp) {
       window.posNative.exitApp();
+    }
+  };
+  const handleToggleFullScreen = () => {
+    if (window?.posNative?.toggleFullScreen) {
+      window.posNative.toggleFullScreen();
+    }
+  };
+  const handleShutdownSystem = () => {
+    if (window?.posNative?.shutdownSystem) {
+      window.posNative.shutdownSystem();
     }
   };
   const [activeTab, setActiveTab] = useState('pos'); // 'pos', 'inventory', 'sales'
@@ -279,11 +291,25 @@ export default function App() {
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const activeStore = stores.find((store) => store.id === activeStoreId) || null;
   const storedReceiptWidth = Number(activeStore?.receiptWidth);
-  const receiptWidth = Number.isFinite(storedReceiptWidth)
+  const defaultReceiptWidth = Number.isFinite(storedReceiptWidth)
     && storedReceiptWidth >= MIN_RECEIPT_WIDTH_MM
     && storedReceiptWidth <= MAX_RECEIPT_WIDTH_MM
     ? String(storedReceiptWidth)
     : '58';
+
+  const [localPrintSettings, setLocalPrintSettings] = useState(() => getLocalPrintSettings(activeStoreId));
+
+  useEffect(() => {
+    setLocalPrintSettings(getLocalPrintSettings(activeStoreId));
+  }, [activeStoreId]);
+
+  const receiptWidth = localPrintSettings?.receiptWidth || defaultReceiptWidth;
+  const defaultPrinter = localPrintSettings?.defaultPrinter !== undefined
+    ? localPrintSettings.defaultPrinter
+    : (activeStore?.defaultPrinter || '');
+  const silentPrint = localPrintSettings?.silentPrint !== undefined
+    ? Boolean(localPrintSettings.silentPrint)
+    : (activeStore?.silentPrint !== undefined ? Boolean(activeStore.silentPrint) : false);
   const isGeneralView = isStoreManager && !selectedStoreId;
   const purchaseRequestStoreIds = isStoreManager
     ? selectedStoreId ? [selectedStoreId] : activeStores.map((store) => store.id)
@@ -425,16 +451,109 @@ export default function App() {
       };
     }
 
-    const clearPrintedDocument = () => {
-      setTicketToPrint(null);
-    };
-    window.addEventListener('afterprint', clearPrintedDocument);
-    window.print();
+    const targetSilent = ticketToPrint.data?.silent !== undefined
+      ? Boolean(ticketToPrint.data.silent)
+      : Boolean(silentPrint);
+    const targetPrinter = targetSilent
+      ? (ticketToPrint.data?.printerName !== undefined ? ticketToPrint.data.printerName : defaultPrinter)
+      : undefined;
+
+    const chosenReceiptWidth = ticketToPrint.data?.receiptWidth || receiptWidth;
+
+    const textTicket = formatTicketToText(ticketToPrint, {
+      receiptWidth: chosenReceiptWidth,
+      stores,
+    });
+
+    if (window?.posNative?.printTicket || window?.posNative?.printSilent) {
+      const timeoutId = window.setTimeout(async () => {
+        try {
+          const printFn = window.posNative.printTicket || window.posNative.printSilent;
+          await printFn({
+            silent: targetSilent,
+            deviceName: targetPrinter || undefined,
+            text: textTicket,
+            receiptWidth: chosenReceiptWidth,
+          });
+        } catch (err) {
+          console.error('Error al imprimir ticket en escritorio (Electron):', err);
+        } finally {
+          window.setTimeout(() => {
+            if (isMounted) setTicketToPrint(null);
+          }, 1000);
+        }
+      }, 150);
+
+      return () => {
+        isMounted = false;
+        window.clearTimeout(timeoutId);
+      };
+    }
+
+    // Si la impresión silenciosa está desactivada en web, abrir directamente el diálogo nativo
+    if (!targetSilent) {
+      const timeoutId = window.setTimeout(() => {
+        const clearPrintedDocument = () => {
+          window.setTimeout(() => {
+            if (isMounted) setTicketToPrint(null);
+          }, 1500);
+        };
+        window.addEventListener('afterprint', clearPrintedDocument, { once: true });
+        window.print();
+      }, 250);
+
+      return () => {
+        isMounted = false;
+        window.clearTimeout(timeoutId);
+      };
+    }
+
+    // 3. Web Dev / Backend Print API (solo cuando la impresión silenciosa está activada)
+
+    const timeoutId = window.setTimeout(async () => {
+      let printedViaApi = false;
+      try {
+        const response = await fetch('/__api__/print', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceName: targetPrinter,
+            silent: targetSilent,
+            text: textTicket,
+            receiptWidth: chosenReceiptWidth,
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result?.success) {
+            printedViaApi = true;
+          }
+        }
+      } catch {
+        // Endpoint no disponible en producción web estática pura
+      }
+
+      if (printedViaApi) {
+        if (isMounted) setTicketToPrint(null);
+        return;
+      }
+
+      // 4. Fallback estándar para navegadores web: window.print()
+      const clearPrintedDocument = () => {
+        window.setTimeout(() => {
+          if (isMounted) setTicketToPrint(null);
+        }, 1500);
+      };
+      window.addEventListener('afterprint', clearPrintedDocument, { once: true });
+      window.print();
+    }, 150);
+
     return () => {
       isMounted = false;
-      window.removeEventListener('afterprint', clearPrintedDocument);
+      window.clearTimeout(timeoutId);
     };
-  }, [ticketToPrint]);
+  }, [ticketToPrint, defaultPrinter, silentPrint, receiptWidth, stores]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setDayRange(getCurrentDayRange()), 60_000);
@@ -1008,25 +1127,64 @@ export default function App() {
     }
   };
 
-  const handleSaveReceiptWidth = async (value) => {
-    if (!isAdmin || !activeStoreId || isSavingReceiptWidth) return false;
-    const width = Number(value);
-    if (!Number.isFinite(width) || width < MIN_RECEIPT_WIDTH_MM || width > MAX_RECEIPT_WIDTH_MM) {
+  const handleSavePrintSettings = async ({ receiptWidth: nextWidth, defaultPrinter: nextPrinter, silentPrint: nextSilent }) => {
+    if (isSavingReceiptWidth) return false;
+    const widthNum = Number(nextWidth);
+    if (!Number.isFinite(widthNum) || widthNum < MIN_RECEIPT_WIDTH_MM || widthNum > MAX_RECEIPT_WIDTH_MM) {
       setActionError('El ancho del ticket debe estar entre 30 y 120 mm.');
       return false;
     }
 
+    const newSettings = {
+      receiptWidth: String(widthNum),
+      defaultPrinter: typeof nextPrinter === 'string' ? nextPrinter.trim() : '',
+      silentPrint: Boolean(nextSilent),
+    };
+
     setActionError('');
     setIsSavingReceiptWidth(true);
     try {
-      await saveStoreReceiptWidth(activeStoreId, width);
+      saveLocalPrintSettings(activeStoreId, newSettings);
+      setLocalPrintSettings(newSettings);
+
+      if (isAdmin && activeStoreId) {
+        await saveStorePrintSettings(activeStoreId, {
+          receiptWidth: widthNum,
+          defaultPrinter: newSettings.defaultPrinter,
+          silentPrint: newSettings.silentPrint,
+        });
+      }
       return true;
     } catch (error) {
-      setActionError(error.message || 'No se pudo guardar el ancho del ticket.');
+      setActionError(error.message || 'No se pudo guardar la configuración de impresión.');
       return false;
     } finally {
       setIsSavingReceiptWidth(false);
     }
+  };
+
+  const handleSaveReceiptWidth = async (value) => {
+    return handleSavePrintSettings({
+      receiptWidth: value,
+      defaultPrinter,
+      silentPrint,
+    });
+  };
+
+  const handleTestPrint = ({ defaultPrinter: pName, silentPrint: isSilent, receiptWidth: rWidth } = {}) => {
+    const willBeSilent = isSilent !== undefined ? Boolean(isSilent) : Boolean(silentPrint);
+    const chosenWidth = rWidth ? String(rWidth) : String(receiptWidth);
+    setTicketToPrint({
+      type: 'test',
+      data: {
+        storeId: activeStoreId,
+        storeName: activeStore?.name || 'POSKlean',
+        printerName: willBeSilent ? (pName !== undefined ? pName : defaultPrinter) : '',
+        silent: willBeSilent,
+        receiptWidth: chosenWidth,
+        timestamp: new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
+      },
+    });
   };
 
   const handleSaveMinStock = async (event, productId) => {
@@ -1468,7 +1626,7 @@ export default function App() {
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-400/90 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition cursor-pointer"
               >
                 <Power className="w-3.5 h-3.5 text-rose-400" />
-                <span>Cerrar aplicación (Kiosko)</span>
+                <span>Apagar / Salir (Kiosko)</span>
               </button>
             </div>
           )}
@@ -1477,7 +1635,9 @@ export default function App() {
         <ExitConfirmModal
           isOpen={showExitConfirmModal}
           onClose={() => setShowExitConfirmModal(false)}
-          onConfirm={handleExitApp}
+          onExitApp={handleExitApp}
+          onToggleFullScreen={handleToggleFullScreen}
+          onShutdownSystem={handleShutdownSystem}
         />
       </div>
     );
@@ -1516,7 +1676,7 @@ export default function App() {
               className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold rounded-2xl text-xs transition border border-rose-500/30 flex items-center justify-center gap-2 cursor-pointer"
             >
               <Power className="w-4 h-4 text-rose-400" />
-              <span>Cerrar Aplicación (Kiosko)</span>
+              <span>Apagar / Salir (Kiosko)</span>
             </button>
           )}
         </div>
@@ -1524,7 +1684,9 @@ export default function App() {
         <ExitConfirmModal
           isOpen={showExitConfirmModal}
           onClose={() => setShowExitConfirmModal(false)}
-          onConfirm={handleExitApp}
+          onExitApp={handleExitApp}
+          onToggleFullScreen={handleToggleFullScreen}
+          onShutdownSystem={handleShutdownSystem}
         />
       </div>
     );
@@ -1568,7 +1730,7 @@ export default function App() {
               className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold rounded-2xl text-xs transition border border-rose-500/30 flex items-center justify-center gap-2 cursor-pointer"
             >
               <Power className="w-4 h-4 text-rose-400" />
-              <span>Cerrar Aplicación (Kiosko)</span>
+              <span>Apagar / Salir (Kiosko)</span>
             </button>
           )}
         </div>
@@ -1576,14 +1738,17 @@ export default function App() {
         <ExitConfirmModal
           isOpen={showExitConfirmModal}
           onClose={() => setShowExitConfirmModal(false)}
-          onConfirm={handleExitApp}
+          onExitApp={handleExitApp}
+          onToggleFullScreen={handleToggleFullScreen}
+          onShutdownSystem={handleShutdownSystem}
         />
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans transition-[padding] duration-200 pl-16 ${sidebarOpen ? 'lg:pl-64' : ''}`}>
+    <>
+      <div className={`app-main-layout min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans transition-[padding] duration-200 pl-16 ${sidebarOpen ? 'lg:pl-64' : ''}`}>
       {(!isOnline || pendingSalesCount > 0) && (
         <div className="bg-amber-500 px-4 py-1.5 text-center text-sm font-semibold text-slate-900">
           {!isOnline ? 'Sin conexión: las ventas se guardan localmente. ' : 'Sincronizando ventas. '}
@@ -1770,17 +1935,17 @@ export default function App() {
             </button>
           </div>
 
-          {/*{isElectron && (
+          {isElectron && (
             <button
               type="button"
               onClick={() => setShowExitConfirmModal(true)}
-              title="Apagar / Cerrar aplicación"
+              title="Apagar / Salir"
               className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-100 cursor-pointer shadow-sm"
             >
               <Power className="h-4 w-4 text-rose-400" />
               <span className="hidden sm:inline">Apagar</span>
             </button>
-          )}*/}
+          )}
         </div>
 
         {/* Sidebar */}
@@ -1931,12 +2096,12 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowExitConfirmModal(true)}
-                aria-label="Cerrar aplicación"
-                title="Cerrar aplicación"
+                aria-label="Apagar / Salir"
+                title="Apagar / Salir"
                 className={`flex-none flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 text-rose-400 hover:text-rose-200 hover:bg-rose-500/10 cursor-pointer w-full gap-2 ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
               >
                 <Power className="w-4 h-4 shrink-0" />
-                <span className="hidden lg:inline text-xs font-semibold">Cerrar App</span>
+                <span className="hidden lg:inline text-xs font-semibold">Apagar / Salir</span>
               </button>
             </div>
           )}
@@ -3010,11 +3175,15 @@ export default function App() {
             currentUser={currentUser}
             isAdmin={isAdmin}
             receiptWidth={receiptWidth}
+            defaultPrinter={defaultPrinter}
+            silentPrint={silentPrint}
             receiptWidthStoreId={activeStoreId || ''}
             receiptWidthStoreName={activeStore?.name || ''}
             canEditReceiptWidth={Boolean(isAdmin && activeStoreId)}
             isSavingReceiptWidth={isSavingReceiptWidth}
             onReceiptWidthChange={handleSaveReceiptWidth}
+            onSavePrintSettings={handleSavePrintSettings}
+            onTestPrint={handleTestPrint}
             channels={storedChannels}
             successMessage={userSuccessMessage}
             onDismissSuccess={() => setUserSuccessMessage('')}
@@ -3744,14 +3913,21 @@ export default function App() {
         </div>
       )}
 
-      <PrintTicket ticket={ticketToPrint} receiptWidth={receiptWidth} stores={stores} />
+      </div>
+
+      <PrintTicket
+        ticket={ticketToPrint}
+        receiptWidth={ticketToPrint?.data?.receiptWidth || receiptWidth}
+        stores={stores}
+      />
 
       <ExitConfirmModal
         isOpen={showExitConfirmModal}
         onClose={() => setShowExitConfirmModal(false)}
-        onConfirm={handleExitApp}
+        onExitApp={handleExitApp}
+        onToggleFullScreen={handleToggleFullScreen}
+        onShutdownSystem={handleShutdownSystem}
       />
-
-    </div>
+    </>
   );
 }

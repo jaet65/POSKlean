@@ -19,33 +19,55 @@ body {
   }
 
   html,
-  body,
-  #root {
+  body {
     width: auto !important;
+    height: auto !important;
     min-height: 0 !important;
     margin: 0 !important;
+    padding: 0 !important;
     border: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  #root {
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #fff !important;
   }
 
-  body * {
-    visibility: hidden !important;
+  /* Ocultar la interfaz principal de la aplicación y modales flotantes */
+  .app-main-layout,
+  .fixed {
+    display: none !important;
+  }
+
+  #root > *:not(.print-ticket) {
+    display: none !important;
+  }
+
+  .print-ticket {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: calc(var(--receipt-width, 80mm) - 4mm) !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    color: #000 !important;
+    background: #fff !important;
+    font: 10pt/1.35 Arial, sans-serif !important;
   }
 
   .print-ticket,
   .print-ticket * {
     visibility: visible !important;
-  }
-
-  .print-ticket {
-    display: block;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: calc(var(--receipt-width, 58mm) - 4mm);
-    color: #000;
-    background: #fff;
-    font: 10pt/1.35 Arial, sans-serif;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .print-ticket h1 {

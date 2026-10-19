@@ -1,7 +1,12 @@
 const { app, BrowserWindow, ipcMain, shell, globalShortcut } = require('electron');
+const { exec } = require('node:child_process');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const net = require('node:net');
+
+let mainWindow = null;
+let isKioskActive = true;
 
 const DEV_URL = 'http://localhost:5173';
 const PROD_PORT = 5199;
@@ -150,12 +155,14 @@ async function createWindow() {
     },
   });
 
+  mainWindow = win;
+
   // Aplicar bloqueo de teclas directamente a la ventana
   blockKioskShortcuts(win);
 
-  // Evitar que la ventana pierda el foco ante intentos de cambio de ventana (Alt+Tab, Menú Inicio, etc.)
+  // Evitar que la ventana pierda el foco si está en modo kiosko activo
   win.on('blur', () => {
-    if (!isQuitting) {
+    if (!isQuitting && isKioskActive) {
       setImmediate(() => {
         if (!win.isDestroyed()) {
           win.focus();
@@ -183,12 +190,162 @@ async function createWindow() {
   win.loadURL(process.env.ELECTRON_DEV ? DEV_URL : serverUrl);
 }
 
-// Impresión directa a la impresora predeterminada, sin diálogo.
-ipcMain.handle('print-silent', (event) => new Promise((resolve) => {
-  event.sender.print({ silent: true, printBackground: true }, (success, reason) => {
-    resolve({ success, reason: reason || null });
+// Consulta impresoras del sistema en Windows mediante PowerShell WMI
+function getWindowsPrinters() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve([]);
+    const cmd = 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Printer | Select-Object Name, Default, PortName, DriverName | ConvertTo-Json"';
+    exec(cmd, { timeout: 5000 }, (err, stdout) => {
+      if (err || !stdout) return resolve([]);
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        const arr = Array.isArray(parsed) ? parsed : [parsed];
+        const list = arr.filter((p) => p && p.Name).map((p) => ({
+          name: p.Name,
+          displayName: p.Name,
+          isDefault: Boolean(p.Default),
+          description: p.DriverName || p.PortName || '',
+        }));
+        resolve(list);
+      } catch {
+        resolve([]);
+      }
+    });
   });
-}));
+}
+
+// Obtener todas las impresoras disponibles combinando Chromium y WMI de Windows
+ipcMain.handle('get-printers', async (event) => {
+  try {
+    const [chromiumPrinters, osPrinters] = await Promise.all([
+      event.sender.getPrintersAsync().catch(() => []),
+      getWindowsPrinters().catch(() => []),
+    ]);
+
+    const printerMap = new Map();
+
+    if (Array.isArray(chromiumPrinters)) {
+      chromiumPrinters.forEach((p) => {
+        if (p?.name) {
+          printerMap.set(p.name, {
+            name: p.name,
+            displayName: p.displayName || p.name,
+            isDefault: Boolean(p.isDefault),
+            description: p.description || '',
+            status: p.status,
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(osPrinters)) {
+      osPrinters.forEach((p) => {
+        if (p?.name) {
+          const existing = printerMap.get(p.name);
+          printerMap.set(p.name, {
+            name: p.name,
+            displayName: existing?.displayName || p.displayName || p.name,
+            isDefault: existing ? (existing.isDefault || p.isDefault) : p.isDefault,
+            description: existing?.description || p.description || '',
+            status: existing?.status,
+          });
+        }
+      });
+    }
+
+    return Array.from(printerMap.values());
+  } catch (err) {
+    console.error('Error al consultar impresoras:', err);
+    return [];
+  }
+});
+
+// Función compartida para ejecutar impresión en Electron
+const handlePrintAction = async (webContents, options = {}) => {
+  const isSilent = options.silent !== undefined ? Boolean(options.silent) : true;
+  const deviceName = typeof options.deviceName === 'string' ? options.deviceName.trim() : '';
+  const widthMm = Number(options.receiptWidth || 80);
+  const is58mm = widthMm <= 60;
+
+  // 1. Si es modo silencioso y la impresora es virtual ESC_POS (puerto 9100), enviar directo al socket TCP
+  if (isSilent && options.text) {
+    const isEscPosVirtual = !deviceName || deviceName.toLowerCase().includes('esc_pos') || deviceName.toLowerCase().includes('virtual');
+    if (isEscPosVirtual) {
+      try {
+        const sentViaTcp = await new Promise((resolve) => {
+          const socket = new net.Socket();
+          socket.setTimeout(2500);
+          socket.on('error', () => {
+            socket.destroy();
+            resolve(false);
+          });
+          socket.on('timeout', () => {
+            socket.destroy();
+            resolve(false);
+          });
+          socket.connect(9100, '127.0.0.1', () => {
+            // Inicializar impresora ESC/POS
+            socket.write(Buffer.from([0x1b, 0x40]));
+            // Margen izquierdo a 0
+            socket.write(Buffer.from([0x1d, 0x4c, 0x00, 0x00]));
+            if (is58mm) {
+              // GS W 384 dots (0x80, 0x01) para rollo de 58 mm
+              socket.write(Buffer.from([0x1d, 0x57, 0x80, 0x01]));
+            } else {
+              // GS W 576 dots (0x40, 0x02) para rollo de 80 mm
+              socket.write(Buffer.from([0x1d, 0x57, 0x40, 0x02]));
+            }
+            socket.write(options.text);
+            socket.write('\r\n\r\n\r\n\r\n');
+            // GS V 0 : Corte de papel
+            socket.write(Buffer.from([0x1d, 0x56, 0x30]));
+            socket.end(() => resolve(true));
+          });
+        });
+
+        if (sentViaTcp) {
+          return { success: true, method: 'tcp-9100' };
+        }
+      } catch {
+        // Continuar con impresión estándar si falla el socket
+      }
+    }
+  }
+
+  // 2. Impresión estándar mediante Chromium / Windows Spooler
+  // Las impresoras virtuales PDF (ej. Microsoft Print to PDF) requieren diálogo interactivo para elegir archivo destino
+  const isPdfPrinter = deviceName.toLowerCase().includes('pdf');
+  const effectiveSilent = isSilent && !isPdfPrinter;
+
+  return new Promise((resolve) => {
+    const printOptions = {
+      silent: effectiveSilent,
+      printBackground: options.printBackground !== undefined ? Boolean(options.printBackground) : true,
+    };
+
+    if (deviceName) {
+      printOptions.deviceName = deviceName;
+    }
+
+    if (options.pageSize) {
+      printOptions.pageSize = options.pageSize;
+    }
+
+    if (options.margins) {
+      printOptions.margins = options.margins;
+    }
+
+    webContents.print(printOptions, (success, reason) => {
+      resolve({ success, reason: reason || null });
+    });
+  });
+};
+
+// Impresión con opciones configurables (impresora por default y silent print)
+ipcMain.handle('print-ticket', (event, options) => handlePrintAction(event.sender, options));
+
+// Compatibilidad con print-silent original
+ipcMain.handle('print-silent', (event, options) => handlePrintAction(event.sender, { ...options, silent: true }));
 
 // Cierre/apagado ordenado de la aplicación desde el modo kiosko
 ipcMain.handle('app-exit', () => {
@@ -196,7 +353,66 @@ ipcMain.handle('app-exit', () => {
   // Si en 1.5s no ha terminado el cierre ordenado, forzar salida del proceso
   setTimeout(() => {
     app.exit(0);
-  }, 1500).unref();
+  }, 1200).unref();
+  app.quit();
+});
+
+// Salir del modo pantalla completa / kiosko
+ipcMain.handle('app-exit-fullscreen', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  isKioskActive = false;
+  mainWindow.setKiosk(false);
+  mainWindow.setFullScreen(false);
+  mainWindow.setAlwaysOnTop(false);
+  mainWindow.setSize(1280, 800);
+  mainWindow.center();
+  return true;
+});
+
+// Alternar modo pantalla completa / kiosko
+ipcMain.handle('app-toggle-fullscreen', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const isCurrentlyFull = mainWindow.isKiosk() || mainWindow.isFullScreen();
+  if (isCurrentlyFull) {
+    isKioskActive = false;
+    mainWindow.setKiosk(false);
+    mainWindow.setFullScreen(false);
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setSize(1280, 800);
+    mainWindow.center();
+    return false;
+  } else {
+    isKioskActive = true;
+    mainWindow.setAlwaysOnTop(!process.env.ELECTRON_DEV);
+    mainWindow.setFullScreen(true);
+    mainWindow.setKiosk(true);
+    return true;
+  }
+});
+
+// Consultar si la ventana está en pantalla completa
+ipcMain.handle('app-is-fullscreen', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  return Boolean(mainWindow.isKiosk() || mainWindow.isFullScreen());
+});
+
+// Apagar el equipo por completo (Sistema Operativo)
+ipcMain.handle('app-shutdown-system', () => {
+  isQuitting = true;
+  try {
+    if (process.platform === 'win32') {
+      exec('shutdown /s /t 0', () => {});
+    } else if (process.platform === 'darwin') {
+      exec('osascript -e \'tell application "System Events" to shut down\'', () => {});
+    } else {
+      exec('systemctl poweroff || shutdown -h now', () => {});
+    }
+  } catch (err) {
+    console.error('Error al apagar el equipo:', err);
+  }
+  setTimeout(() => {
+    app.exit(0);
+  }, 1000).unref();
   app.quit();
 });
 
