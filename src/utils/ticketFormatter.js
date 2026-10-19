@@ -93,23 +93,44 @@ export function formatTicketToText(ticket, { receiptWidth = 80, stores = [] } = 
     lines.push(centerText('¡Gracias por su compra!', width));
     lines.push(separator('-', width));
   } else if (type === 'cashShift') {
-    lines.push(centerText('CIERRE DE TURNO', width));
-    lines.push(separator('-', width));
+    lines.push(centerText('CORTE Z CONSOLIDADO', width));
+    lines.push(centerText('ARQUEO A CIEGAS', width));
+    lines.push(separator('=', width));
     lines.push(twoColumns('Tienda:', data.storeName || data.storeId || '—', width));
     lines.push(twoColumns('Turno:', String(data.id || '').slice(0, 8).toUpperCase(), width));
     lines.push(twoColumns('Cajero:', data.closedBy?.userName || data.openedBy?.userName || 'Desconocido', width));
     lines.push(twoColumns('Cierre:', data.timestamp || 'Fecha no disponible', width));
     lines.push(separator('-', width));
+    lines.push(centerText('VENTAS CONSOLIDADAS', width));
     lines.push(twoColumns('Tickets:', String(data.saleCount ?? 0), width));
-    lines.push(twoColumns('Fondo inicial:', `${formatCurrency((data.openingCashCents || 0) / 100)} MXN`, width));
-    lines.push(twoColumns('Efectivo:', `${formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN`, width));
-    lines.push(twoColumns('Tarjeta:', `${formatCurrency((data.paymentTotalsCents?.card || 0) / 100)} MXN`, width));
-    lines.push(twoColumns('Transferencia:', `${formatCurrency((data.paymentTotalsCents?.transfer || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Venta Efectivo:', `${formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Venta Tarjeta:', `${formatCurrency((data.paymentTotalsCents?.card || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Venta Transf.:', `${formatCurrency((data.paymentTotalsCents?.transfer || 0) / 100)} MXN`, width));
+    const totalVentas = ((data.paymentTotalsCents?.cash || 0) + (data.paymentTotalsCents?.card || 0) + (data.paymentTotalsCents?.transfer || 0)) / 100;
+    lines.push(twoColumns('TOTAL VENTAS:', `${formatCurrency(totalVentas)} MXN`, width));
     lines.push(separator('-', width));
-    lines.push(twoColumns('Efectivo esperado:', `${formatCurrency((data.expectedCashCents || 0) / 100)} MXN`, width));
-    lines.push(twoColumns('Efectivo contado:', `${formatCurrency((data.countedCashCents || 0) / 100)} MXN`, width));
-    lines.push(twoColumns('Diferencia:', `${formatCurrency((data.cashDifferenceCents || 0) / 100)} MXN`, width));
+    lines.push(centerText('AUDITORIA DE CAJA', width));
+    lines.push(twoColumns('Fondo inicial (+):', `${formatCurrency((data.openingCashCents || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Efectivo vtas (+):', `${formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Esperado (=):', `${formatCurrency((data.expectedCashCents || 0) / 100)} MXN`, width));
+    lines.push(twoColumns('Contado (-):', `${formatCurrency((data.countedCashCents || 0) / 100)} MXN`, width));
     lines.push(separator('-', width));
+    const diff = (data.cashDifferenceCents || 0) / 100;
+    lines.push(twoColumns('DIFERENCIA:', `${formatCurrency(diff)} MXN`, width));
+    const statusText = Math.abs(diff) < 0.01 ? '[ CAJA CUADRADA ]' : diff < 0 ? '[ FALTANTE DE CAJA ]' : '[ SOBRANTE DE CAJA ]';
+    lines.push(centerText(statusText, width));
+    if (data.notes) {
+      lines.push(separator('-', width));
+      lines.push(`Notas: ${data.notes}`);
+    }
+    lines.push(separator('-', width));
+    lines.push('');
+    lines.push(centerText('__________________________', width));
+    lines.push(centerText('Firma Cajero(a)', width));
+    lines.push('');
+    lines.push(centerText('__________________________', width));
+    lines.push(centerText('Firma Auditor / Supervisor', width));
+    lines.push(separator('=', width));
   } else if (type === 'purchaseOrder') {
     lines.push(centerText('ORDEN DE COMPRA', width));
     lines.push(separator('-', width));

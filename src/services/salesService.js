@@ -64,24 +64,6 @@ export async function createSale({
   };
 
   const saleResult = await runTransaction(db, async (transaction) => {
-    // Verificación de idempotencia: si la venta ya fue registrada previamente, se retorna intacta
-    const existingSaleSnapshot = await transaction.get(saleRef);
-    if (existingSaleSnapshot.exists()) {
-      const existing = existingSaleSnapshot.data();
-      const existingDate = existing.timestamp?.toDate ? existing.timestamp.toDate() : null;
-      return {
-        ...existing,
-        id: saleRef.id,
-        ticketId: existing.ticketId || ticketId,
-        timestamp: existingDate
-          ? existingDate.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
-          : new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }),
-        timestampMs: existing.timestamp?.toMillis ? existing.timestamp.toMillis() : Date.now(),
-        alreadyProcessed: true,
-        restockCandidates: [],
-      };
-    }
-
     const [shiftSnapshot, registerSnapshot] = await Promise.all([
       transaction.get(shiftRef),
       transaction.get(registerRef),

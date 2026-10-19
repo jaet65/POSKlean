@@ -716,7 +716,7 @@ service cloud.firestore {
 
     match /cashShifts/{shiftId} {
       allow read: if isAdmin()
-        || (isAuthenticated() && resource.data.cashierId == request.auth.uid);
+        || (isAuthenticated() && (resource == null || resource.data.cashierId == request.auth.uid));
 
       allow create: if canOperatePOS()
         && canOperateStore(request.resource.data.storeId)
@@ -810,7 +810,7 @@ service cloud.firestore {
 
     // Per-store stock (and optional own price) of a catalog product.
     match /stockItems/{stockId} {
-      allow read: if canAccessStore(resource.data.get('storeId', null));
+      allow read: if resource == null || canAccessStore(resource.data.get('storeId', null));
 
       allow create: if isPurchasingStaff()
         && canOperateStore(request.resource.data.storeId)
@@ -845,7 +845,7 @@ service cloud.firestore {
     }
 
     match /sales/{saleId} {
-      allow read: if canAccessStore(resource.data.get('storeId', null));
+      allow read: if resource == null || canAccessStore(resource.data.get('storeId', null));
       allow create: if canOperatePOS()
         && canOperateStore(request.resource.data.storeId)
         && isValidSale(request.resource.data);
@@ -853,7 +853,7 @@ service cloud.firestore {
     }
 
     match /inventoryMovements/{movementId} {
-      allow read: if canAccessStore(resource.data.get('storeId', null));
+      allow read: if resource == null || canAccessStore(resource.data.get('storeId', null));
       allow create: if isValidMovement(request.resource.data)
         && ((request.resource.data.type == 'purchase'
             && isCashierForStore(request.resource.data.storeId))
@@ -873,7 +873,8 @@ service cloud.firestore {
     }
 
     match /purchaseOrders/{orderId} {
-      allow read: if (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
+      allow read: if resource == null
+        || (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
         || isCashierForStore(resource.data.get('storeId', null));
       allow create: if isPurchasingStaff()
         && canOperateStore(request.resource.data.storeId)
@@ -889,7 +890,8 @@ service cloud.firestore {
     }
 
     match /purchaseRequests/{requestId} {
-      allow read: if (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
+      allow read: if resource == null
+        || (isPurchasingStaff() && canAccessStore(resource.data.get('storeId', null)))
         || isCashierForStore(resource.data.get('storeId', null));
       allow create: if ((isPurchasingStaff() && canOperateStore(request.resource.data.storeId))
           || isCashierForStore(request.resource.data.storeId))

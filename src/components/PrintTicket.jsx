@@ -268,28 +268,68 @@ export default function PrintTicket({ ticket, receiptWidth, stores }) {
 
       {type === 'cashShift' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold' }}>
-            <span>CIERRE DE TURNO</span>
+          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.1em' }}>
+            <span>CORTE Z CONSOLIDADO</span>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'center', fontSize: '0.8em', color: '#555' }}>
+            <span>ARQUEO A CIEGAS</span>
+          </div>
+          <hr />
           <div className="receipt-item"><span>Tienda</span><strong>{data.storeName || data.storeId}</strong></div>
-          <div className="receipt-item"><span>Turno</span><strong>{data.id.slice(0, 8).toUpperCase()}</strong></div>
+          <div className="receipt-item"><span>Turno</span><strong>{String(data.id || '').slice(0, 8).toUpperCase()}</strong></div>
           <div className="receipt-item"><span>Cajero</span><strong>{data.closedBy?.userName || data.openedBy?.userName || 'Desconocido'}</strong></div>
           <div className="receipt-item"><span>Cierre</span><strong>{data.timestamp || 'Fecha no disponible'}</strong></div>
           <hr />
-          <div className="receipt-item"><span>Tickets</span><strong>{data.saleCount ?? 0}</strong></div>
-          <div className="receipt-item"><span>Fondo inicial</span><strong>{formatCurrency(data.openingCashCents / 100)} MXN</strong></div>
-          <div className="receipt-item"><span>Ventas en efectivo</span><strong>{formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN</strong></div>
-          <div className="receipt-item"><span>Ventas con tarjeta</span><strong>{formatCurrency((data.paymentTotalsCents?.card || 0) / 100)} MXN</strong></div>
-          <div className="receipt-item"><span>Ventas por transferencia</span><strong>{formatCurrency((data.paymentTotalsCents?.transfer || 0) / 100)} MXN</strong></div>
-          <hr />
-          <div className="receipt-item"><span>Efectivo esperado</span><strong>{formatCurrency(data.expectedCashCents / 100)} MXN</strong></div>
-          <div className="receipt-item"><span>Efectivo contado</span><strong>{formatCurrency(data.countedCashCents / 100)} MXN</strong></div>
+          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.85em' }}>
+            <span>VENTAS CONSOLIDADAS</span>
+          </div>
+          <div className="receipt-item"><span>Tickets emitidos</span><strong>{data.saleCount ?? 0}</strong></div>
+          <div className="receipt-item"><span>Venta Efectivo</span><strong>{formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Venta Tarjeta</span><strong>{formatCurrency((data.paymentTotalsCents?.card || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Venta Transferencia</span><strong>{formatCurrency((data.paymentTotalsCents?.transfer || 0) / 100)} MXN</strong></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }} className="receipt-total">
-            <span>Diferencia</span>
-            <span>{formatCurrency(data.cashDifferenceCents / 100)} MXN</span>
+            <span>TOTAL VENTAS</span>
+            <span>{formatCurrency((((data.paymentTotalsCents?.cash || 0) + (data.paymentTotalsCents?.card || 0) + (data.paymentTotalsCents?.transfer || 0)) / 100))} MXN</span>
+          </div>
+          <hr />
+          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.85em' }}>
+            <span>AUDITORÍA Y CONCILIACIÓN DE EFECTIVO</span>
+          </div>
+          <div className="receipt-item"><span>Fondo inicial (+)</span><strong>{formatCurrency((data.openingCashCents || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Efectivo ventas (+)</span><strong>{formatCurrency((data.paymentTotalsCents?.cash || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Efectivo esperado (=)</span><strong>{formatCurrency((data.expectedCashCents || 0) / 100)} MXN</strong></div>
+          <div className="receipt-item"><span>Efectivo contado (-)</span><strong>{formatCurrency((data.countedCashCents || 0) / 100)} MXN</strong></div>
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.05em' }} className="receipt-total">
+            <span>DIFERENCIA:</span>
+            <span>{formatCurrency((data.cashDifferenceCents || 0) / 100)} MXN</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', fontWeight: 'bold', margin: '4px 0', fontSize: '0.9em' }}>
+            <span>
+              {Math.abs(data.cashDifferenceCents || 0) < 1
+                ? '[ ESTADO: CAJA CUADRADA ]'
+                : (data.cashDifferenceCents || 0) < 0
+                  ? '[ ESTADO: FALTANTE DE CAJA ]'
+                  : '[ ESTADO: SOBRANTE DE CAJA ]'}
+            </span>
+          </div>
+          {data.notes && (
+            <>
+              <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+              <div style={{ fontSize: '0.8em', margin: '2px 0' }}>
+                <span>Notas: {data.notes}</span>
+              </div>
+            </>
+          )}
+          <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
+          <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '0.8em' }}>
+            <div>__________________________________</div>
+            <div>Firma Cajero(a)</div>
+            <div style={{ marginTop: '16px' }}>__________________________________</div>
+            <div>Firma Auditor / Supervisor</div>
           </div>
           <hr style={{ border: 'none', borderTop: '1px dashed #000' }} />
-          <p style={{ textAlign: 'center' }}>Cierre registrado por {data.closedBy?.userName || 'Desconocido'}</p>
+          <p style={{ textAlign: 'center', fontSize: '0.75em' }}>Cierre registrado por {data.closedBy?.userName || 'Desconocido'}</p>
         </>
       )}
 

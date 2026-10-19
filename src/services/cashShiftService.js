@@ -28,24 +28,27 @@ export async function openCashShift({ storeId, user, openingCash, shiftId }) {
   const cashier = userInfo(user);
 
   return runTransaction(db, async (transaction) => {
-    const [registerSnapshot, storeSnapshot, shiftSnapshot] = await Promise.all([
+    const [registerSnapshot, storeSnapshot] = await Promise.all([
       transaction.get(registerRef),
       transaction.get(storeRef),
-      transaction.get(shiftRef),
     ]);
-    if (shiftSnapshot.exists()) {
-      // Idempotency: este turno ya existe en Firestore
-      return {
-        ...shiftSnapshot.data(),
-        id: shiftRef.id,
-        shiftId: shiftRef.id,
-        alreadyOpened: true,
-      };
-    }
     if (!storeSnapshot.exists() || storeSnapshot.data().status === 'archived') {
       throw new Error('No se puede abrir un turno en una tienda archivada o inexistente.');
     }
-    if (registerSnapshot.exists() && registerSnapshot.data().status === 'open' && registerSnapshot.data().shiftId !== shiftRef.id) {
+    if (registerSnapshot.exists() && registerSnapshot.data().status === 'open') {
+      if (registerSnapshot.data().shiftId === shiftRef.id) {
+        // Idempotency: este turno ya existe y fue abierto en esta caja
+        return {
+          id: shiftRef.id,
+          shiftId: shiftRef.id,
+          cashierId,
+          storeId,
+          status: 'open',
+          openingCashCents: Math.round(openingCash * 100),
+          openedBy: cashier,
+          alreadyOpened: true,
+        };
+      }
       throw new Error('Ya tienes un turno abierto. Ciérralo antes de abrir otro.');
     }
     const openCashShiftCount = storeSnapshot.data().openCashShiftCount ?? 0;
@@ -85,16 +88,6 @@ export async function openCashShift({ storeId, user, openingCash, shiftId }) {
       openedBy: cashier,
     };
   });
-
-  return {
-    id: shiftRef.id,
-    shiftId: shiftRef.id,
-    cashierId,
-    storeId,
-    status: 'open',
-    openingCashCents: Math.round(openingCash * 100),
-    openedBy: cashier,
-  };
 }
 
 export async function closeCashShift({ shiftId, storeId, user, countedCash }) {

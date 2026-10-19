@@ -7,6 +7,7 @@ import PurchasingPanel from './components/PurchasingPanel';
 import CatalogPanel from './components/CatalogPanel';
 import AdminPanel from './components/admin/AdminPanel';
 import ExitConfirmModal from './components/ExitConfirmModal';
+import CashShiftModal from './components/CashShiftModal';
 import { DEFAULT_CHANNELS, subscribeToSalesChannels } from './services/channelService';
 import { formatOtherUnits, summarizeVolume } from './utils/volume';
 import { formatCurrency } from './utils/currency';
@@ -26,7 +27,7 @@ import {
   Droplet,
   Layers,
   Printer,
-  Users,
+  FileText,
   ShieldCheck,
   LogOut,
   Lock,
@@ -35,7 +36,6 @@ import {
   History,
   ClipboardCheck,
   Settings,
-  Cog,
   Menu as MenuIcon,
   Power,
   Loader2,
@@ -240,9 +240,9 @@ export default function App() {
   const [showCheckoutSuccess, setShowCheckoutSuccess] = useState(false);
   const [cashShiftModal, setCashShiftModal] = useState(null);
   const [openingCashDraft, setOpeningCashDraft] = useState('0');
-  const [countedCashDraft, setCountedCashDraft] = useState('');
   const [cashShiftActionError, setCashShiftActionError] = useState('');
   const [isSavingCashShift, setIsSavingCashShift] = useState(false);
+  const [corteZReport, setCorteZReport] = useState(null);
 
   // Inventory Modal State
   const [isRestockOpen, setIsRestockOpen] = useState(false);
@@ -969,8 +969,7 @@ export default function App() {
     }
   };
 
-  const handleCloseCashShift = async (event) => {
-    event.preventDefault();
+  const handleCloseCashShift = async ({ countedCash, denominations, notes }) => {
     if (isSavingCashShift || !activeStoreId || !isCashShiftOpen) return;
     if (cart.length > 0) {
       setCashShiftActionError('Vacía el carrito antes de cerrar el turno.');
@@ -983,23 +982,34 @@ export default function App() {
         shift: cashShift,
         storeId: activeStoreId,
         user: currentUser,
-        countedCash: Number(countedCashDraft),
+        countedCash: Number(countedCash),
       });
-      setCashShiftModal(null);
-      setCountedCashDraft('');
+      const reportData = {
+        ...closedShift,
+        storeName: storeNameById.get(activeStoreId) || activeStoreId,
+        denominations: denominations || null,
+        notes: notes || null,
+      };
+      setCorteZReport(reportData);
+      setCashShiftModal('report');
       refreshOffline();
       setTicketToPrint({
         type: 'cashShift',
-        data: {
-          ...closedShift,
-          storeName: storeNameById.get(activeStoreId) || activeStoreId,
-        },
+        data: reportData,
       });
     } catch (error) {
       setCashShiftActionError(error.message || 'No se pudo cerrar el turno.');
     } finally {
       setIsSavingCashShift(false);
     }
+  };
+
+  const handlePrintCorteZ = () => {
+    if (!corteZReport) return;
+    setTicketToPrint({
+      type: 'cashShift',
+      data: corteZReport,
+    });
   };
 
   const handleOpenRestock = (product) => {
@@ -1942,12 +1952,16 @@ export default function App() {
                   <>
                     <span className="font-semibold text-emerald-300">Turno abierto</span>
                     <span className="hidden text-slate-400 xl:inline">
-                      Fondo {formatCurrency(cashShift.openingCashCents / 100)} · Esperado {formatCurrency(currentShiftExpectedCash)}
+                      Fondo {formatCurrency(cashShift.openingCashCents / 100)}
+                      {isAdmin && (
+                        <span className="ml-1 text-slate-400">
+                          · Esperado <span className="font-mono text-cyan-300">{formatCurrency(currentShiftExpectedCash)}</span>
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"
                       onClick={() => {
-                        setCountedCashDraft('');
                         setCashShiftActionError('');
                         setCashShiftModal('close');
                       }}
@@ -1955,12 +1969,21 @@ export default function App() {
                       title={cart.length > 0 ? 'Vacía el carrito antes de cerrar el turno.' : undefined}
                       className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Cerrar caja
+                      Cerrar caja (Corte Z)
                     </button>
                   </>
                 ) : (
                   <>
                     <span className="text-amber-300">Sin turno abierto</span>
+                    {corteZReport && (
+                      <button
+                        type="button"
+                        onClick={() => setCashShiftModal('report')}
+                        className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        Ver último Corte Z
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -2223,18 +2246,30 @@ export default function App() {
                   <p className="text-sm text-slate-400">
                     Registra el fondo de caja inicial para habilitar el punto de venta.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpeningCashDraft('0');
-                      setCashShiftActionError('');
-                      setCashShiftModal('open');
-                    }}
-                    disabled={isSavingCashShift}
-                    className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Abrir turno
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    {corteZReport && (
+                      <button
+                        type="button"
+                        onClick={() => setCashShiftModal('report')}
+                        className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2.5 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20 flex items-center gap-2"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Ver último Corte Z
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpeningCashDraft('0');
+                        setCashShiftActionError('');
+                        setCashShiftModal('open');
+                      }}
+                      disabled={isSavingCashShift}
+                      className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Abrir turno
+                    </button>
+                  </div>
                 </>
               )}
             </section>
@@ -3092,23 +3127,35 @@ export default function App() {
                       {isCajero ? ' · Cierre personal' : ' · Cierre general'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setTicketToPrint({
-                      type: 'cashClosure',
-                      data: {
-                        ...cashClosureSummary,
-                        date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
-                        closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
-                        closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
-                      },
-                    })}
-                    disabled={cashClosureSummary.tickets === 0}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Printer className="w-4 h-4" />
-                    Imprimir resumen
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {corteZReport && (
+                      <button
+                        type="button"
+                        onClick={() => setCashShiftModal('report')}
+                        className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 flex items-center gap-1.5 transition"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Ver último Corte Z
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTicketToPrint({
+                        type: 'cashClosure',
+                        data: {
+                          ...cashClosureSummary,
+                          date: new Date(dayRange.start).toLocaleDateString('es-MX', { dateStyle: 'short' }),
+                          closedAt: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+                          closedBy: currentUser.displayName || currentUser.username || currentUser.email || 'Usuario',
+                        },
+                      })}
+                      disabled={cashClosureSummary.tickets === 0}
+                      className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Printer className="w-4 h-4" />
+                      Imprimir resumen
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
@@ -3406,156 +3453,22 @@ export default function App() {
           </div>
         )}
 
-        {cashShiftModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="cash-shift-modal-title"
-              className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl"
-            >
-              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-                <div>
-                  <h2 id="cash-shift-modal-title" className="text-base font-bold text-white">
-                    {cashShiftModal === 'open' ? 'Abrir turno de caja' : 'Cerrar turno y hacer cierre'}
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {storeNameById.get(activeStoreId) || 'Tienda seleccionada'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCashShiftModal(null)}
-                  disabled={isSavingCashShift}
-                  aria-label="Cerrar"
-                  className="p-1 text-lg text-slate-400 hover:text-white disabled:opacity-50"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {cashShiftModal === 'open' ? (
-                <form onSubmit={handleOpenCashShift} className="space-y-4">
-                  <p className="text-xs text-slate-300">
-                    Captura el efectivo que queda en caja al iniciar. Las ventas de turnos anteriores no se incluirán.
-                  </p>
-                  <div>
-                    <label htmlFor="opening-cash" className="mb-1 block text-xs font-medium text-slate-300">
-                      Fondo inicial (MXN)
-                    </label>
-                    <input
-                      id="opening-cash"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      autoFocus
-                      value={openingCashDraft}
-                      onChange={(event) => setOpeningCashDraft(event.target.value)}
-                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
-                    />
-                  </div>
-                  {cashShiftActionError && (
-                    <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                      {cashShiftActionError}
-                    </p>
-                  )}
-                  <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setCashShiftModal(null)}
-                      disabled={isSavingCashShift}
-                      className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingCashShift}
-                      className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
-                    >
-                      {isSavingCashShift ? 'Abriendo...' : 'Abrir turno'}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <form onSubmit={handleCloseCashShift} className="space-y-4">
-                  <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs">
-                    <div className="flex justify-between gap-3 text-slate-300">
-                      <span>Fondo inicial</span>
-                      <strong className="font-mono">{formatCurrency((cashShift?.openingCashCents || 0) / 100)}</strong>
-                    </div>
-                    <div className="flex justify-between gap-3 text-slate-300">
-                      <span>Ventas en efectivo ({cashShift?.saleCount || 0} tickets totales)</span>
-                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.cash)}</strong>
-                    </div>
-                    <div className="flex justify-between gap-3 text-slate-300">
-                      <span>Ventas con tarjeta</span>
-                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.card)}</strong>
-                    </div>
-                    <div className="flex justify-between gap-3 text-slate-300">
-                      <span>Ventas por transferencia</span>
-                      <strong className="font-mono">{formatCurrency(currentShiftPaymentTotals.transfer)}</strong>
-                    </div>
-                    <div className="flex justify-between gap-3 border-t border-slate-700 pt-2 font-semibold text-white">
-                      <span>Efectivo esperado</span>
-                      <strong className="font-mono text-cyan-300">{formatCurrency(currentShiftExpectedCash)}</strong>
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="counted-cash" className="mb-1 block text-xs font-medium text-slate-300">
-                      Efectivo contado al cierre (MXN)
-                    </label>
-                    <input
-                      id="counted-cash"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      autoFocus
-                      value={countedCashDraft}
-                      onChange={(event) => setCountedCashDraft(event.target.value)}
-                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none"
-                    />
-                  </div>
-                  {countedCashDraft !== '' && Number.isFinite(Number(countedCashDraft)) && (
-                    <p className="text-xs text-slate-300">
-                      Diferencia estimada:{' '}
-                      <strong className={Number(countedCashDraft) - currentShiftExpectedCash === 0
-                        ? 'text-emerald-300'
-                        : 'text-amber-300'}
-                      >
-                        {formatCurrency(Number(countedCashDraft) - currentShiftExpectedCash)}
-                      </strong>
-                    </p>
-                  )}
-                  {cashShiftActionError && (
-                    <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                      {cashShiftActionError}
-                    </p>
-                  )}
-                  <div className="flex justify-end gap-2 border-t border-slate-700 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setCashShiftModal(null)}
-                      disabled={isSavingCashShift}
-                      className="rounded-xl bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingCashShift}
-                      className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 disabled:opacity-50"
-                    >
-                      {isSavingCashShift ? 'Cerrando...' : 'Guardar cierre'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-        )}
+        <CashShiftModal
+          isOpen={Boolean(cashShiftModal)}
+          mode={cashShiftModal}
+          onClose={() => setCashShiftModal(null)}
+          cashShift={cashShift}
+          storeName={storeNameById.get(activeStoreId) || activeStoreId}
+          currentUser={currentUser}
+          openingCashDraft={openingCashDraft}
+          setOpeningCashDraft={setOpeningCashDraft}
+          onOpenShift={handleOpenCashShift}
+          onCloseShift={handleCloseCashShift}
+          isSaving={isSavingCashShift}
+          actionError={cashShiftActionError}
+          corteZReport={corteZReport}
+          onPrintCorteZ={handlePrintCorteZ}
+        />
 
         {isStoreModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm">
