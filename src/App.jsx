@@ -43,6 +43,7 @@ import {
   ArrowDownCircle,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { checkApkUpdate, startApkUpdate } from './services/apkUpdater';
 import { Printer as NativePrinter } from '@capgo/capacitor-printer';
 import { usePOSData } from './hooks/usePOSData';
 import { useCashShift } from './hooks/useCashShift';
@@ -140,6 +141,48 @@ export default function App() {
       return () => unsubscribe();
     }
   }, []);
+
+  // En Android (Capacitor), verificar actualizaciones de APK vía GitHub Releases
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.1';
+      checkApkUpdate(currentVersion).then((res) => {
+        if (res?.hasUpdate) {
+          setUpdateState({
+            platform: 'android',
+            status: 'available',
+            version: res.version,
+            apkUrl: res.apkUrl,
+            fileName: res.fileName,
+          });
+        }
+      }).catch((err) => {
+        console.warn('No se pudo verificar actualización APK:', err);
+      });
+    }
+  }, []);
+
+  const handleTriggerUpdate = async () => {
+    if (updateState?.platform === 'android' && updateState?.apkUrl) {
+      try {
+        setUpdateState((prev) => ({ ...prev, status: 'downloading', percent: 0 }));
+        await startApkUpdate(updateState.apkUrl, updateState.fileName, (progress) => {
+          setUpdateState((prev) => ({
+            ...prev,
+            status: 'downloading',
+            percent: progress.percent || 0,
+          }));
+        });
+        setUpdateState((prev) => ({ ...prev, status: 'downloaded' }));
+      } catch (err) {
+        console.error('Error al descargar o instalar APK:', err);
+        alert('Error al descargar o iniciar instalación de la actualización: ' + (err?.message || err));
+        setUpdateState((prev) => ({ ...prev, status: 'available' }));
+      }
+    } else if (window?.posNative?.installUpdate) {
+      window.posNative.installUpdate();
+    }
+  };
   const [stores, setStores] = useState([]);
   const [storesLoaded, setStoresLoaded] = useState(false);
   const hasPromptedFirstStore = useRef(false);
@@ -1798,12 +1841,12 @@ export default function App() {
                   Descargando v{updateState.version || ''} ({updateState.percent || 0}%)
                 </span>
               )}
-              {updateState?.status === 'downloaded' && (
+              {(updateState?.status === 'downloaded' || (updateState?.platform === 'android' && updateState?.status === 'available')) && (
                 <button
                   type="button"
-                  onClick={() => window?.posNative?.installUpdate?.()}
+                  onClick={handleTriggerUpdate}
                   className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition animate-bounce cursor-pointer"
-                  title="Haz clic para reiniciar e instalar la nueva versión"
+                  title="Haz clic para descargar e instalar la nueva versión"
                 >
                   <ArrowDownCircle className="w-3.5 h-3.5" />
                   Actualizar a v{updateState.version}
