@@ -1847,7 +1847,7 @@ export default function App() {
                 {updateState?.status === 'downloading' && (
                   <span className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 animate-pulse">
                     <RefreshCw className="w-3 h-3 animate-spin" />
-                    Descargando v{updateState.version || ''} ({updateState.percent || 0}%)
+                    Actualizando...({updateState.percent || 0}%)
                   </span>
                 )}
                 {updateState?.status === 'error' && (
@@ -1867,7 +1867,7 @@ export default function App() {
                     title="Haz clic para descargar e instalar la nueva versión"
                   >
                     <ArrowDownCircle className="w-3.5 h-3.5" />
-                    Actualizar {updateState?.version ? `a v${updateState.version}` : ''}
+                    Actualizar
                   </button>
                 )}
               </h1>
