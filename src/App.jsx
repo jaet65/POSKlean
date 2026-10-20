@@ -6,6 +6,7 @@ import InventoryTable from './components/InventoryTable';
 import PurchasingPanel from './components/PurchasingPanel';
 import CatalogPanel from './components/CatalogPanel';
 import AdminPanel from './components/admin/AdminPanel';
+import FinancePanel from './components/FinancePanel';
 import ExitConfirmModal from './components/ExitConfirmModal';
 import CashShiftModal from './components/CashShiftModal';
 import { DEFAULT_CHANNELS, subscribeToSalesChannels } from './services/channelService';
@@ -36,6 +37,7 @@ import {
   History,
   ClipboardCheck,
   Settings,
+  PieChart,
   Menu as MenuIcon,
   Power,
   Loader2,
@@ -343,6 +345,8 @@ export default function App() {
   const canAccessPurchases = currentUser?.status === 'active'
     && (isStoreManager || (isCashier && Boolean(currentUser?.storeId)));
   const canAccessCatalog = currentUser?.status === 'active' && isStoreManager;
+  const canAccessFinance = currentUser?.status === 'active'
+    && (isStoreManager || Boolean(currentUser?.permissions?.finance));
   const activeStoreId = isStoreManager ? selectedStoreId : currentUser?.storeId || null;
   const activeStore = stores.find((store) => store.id === activeStoreId) || null;
   const storedReceiptWidth = Number(activeStore?.receiptWidth);
@@ -466,17 +470,19 @@ export default function App() {
     pos: canUsePos,
     inventory: canAccessInventory,
     sales: canAccessSales,
+    finance: canAccessFinance,
     purchases: canAccessPurchases,
     catalog: canAccessCatalog,
     users: canAccessUsers,
   };
   const fallbackTabs = {
-    pos: ['inventory', 'purchases', 'catalog', 'sales', 'users'],
-    inventory: ['pos', 'purchases', 'catalog', 'sales', 'users'],
-    purchases: ['pos', 'inventory', 'catalog', 'sales', 'users'],
-    catalog: ['pos', 'inventory', 'purchases', 'sales', 'users'],
-    sales: ['pos', 'inventory', 'purchases', 'catalog', 'users'],
-    users: ['pos', 'inventory', 'purchases', 'catalog', 'sales'],
+    pos: ['inventory', 'purchases', 'catalog', 'sales', 'finance', 'users'],
+    inventory: ['pos', 'purchases', 'catalog', 'sales', 'finance', 'users'],
+    purchases: ['pos', 'inventory', 'catalog', 'sales', 'finance', 'users'],
+    catalog: ['pos', 'inventory', 'purchases', 'sales', 'finance', 'users'],
+    sales: ['pos', 'inventory', 'purchases', 'catalog', 'finance', 'users'],
+    finance: ['pos', 'inventory', 'purchases', 'catalog', 'sales', 'users'],
+    users: ['pos', 'inventory', 'purchases', 'catalog', 'sales', 'finance'],
   };
   const visibleTab = !currentUser || currentUser.status !== 'active' || tabPermissions[activeTab]
     ? activeTab
@@ -2170,6 +2176,22 @@ export default function App() {
               </button>
             )}
 
+            {canAccessFinance && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('finance')}
+                aria-label="Finanzas y Rentabilidad"
+                title="Finanzas y Rentabilidad"
+                className={`flex-none flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4 ${visibleTab === 'finance'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+              >
+                <PieChart className="w-4 h-4" />
+                <span className="hidden lg:inline">Finanzas</span>
+              </button>
+            )}
+
             {canAccessUsers && (
               <button
                 type="button"
@@ -3307,6 +3329,18 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB: FINANZAS Y RENTABILIDAD */}
+          {visibleTab === 'finance' && canAccessFinance && (
+            <FinancePanel
+              currentUser={currentUser}
+              stores={activeStores}
+              activeStoreId={activeStoreId}
+              salesHistory={salesHistory}
+              stockItems={products}
+              catalog={catalog}
+            />
+          )}
+
           {/* TAB 4: CONTROL DE USUARIOS Y PERMISOS */}
           {visibleTab === 'users' && canAccessUsers && (
             <AdminPanel
@@ -3874,6 +3908,20 @@ export default function App() {
                       <div>
                         <p className="font-semibold text-white">Ventas y Reportes</p>
                         <p className="text-[11px] text-slate-400">Historial y métricas de dinero</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(userForm.permissions?.finance)}
+                        onChange={() => handlePermissionToggle('finance')}
+                        disabled={editingUser && editingUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-800 border-slate-600 focus:ring-cyan-400"
+                      />
+                      <div>
+                        <p className="font-semibold text-white">Finanzas & Rentabilidad</p>
+                        <p className="text-[11px] text-slate-400">OPEX, CAPEX, P&L, ROI y proyecciones</p>
                       </div>
                     </label>
 

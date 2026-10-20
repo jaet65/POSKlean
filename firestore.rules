@@ -208,6 +208,11 @@ service cloud.firestore {
       return isAdmin() || (isActiveStaff() && profile().role == 'supervisor');
     }
 
+    function isFinanceStaff() {
+      return isAdmin()
+        || (isActiveStaff() && (profile().role == 'supervisor' || profile().get('permissions', {}).get('finance', false) == true));
+    }
+
     function supplierPath(supplierId) {
       return /databases/$(database)/documents/suppliers/$(supplierId);
     }
@@ -899,6 +904,24 @@ service cloud.firestore {
       allow update: if canOperateStore(resource.data.get('storeId', null))
         && isPurchaseRequestDecision(resource.data, request.resource.data);
       allow delete: if false;
+    }
+
+    match /financeTransactions/{transactionId} {
+      allow read: if isFinanceStaff();
+      allow create: if isFinanceStaff()
+        && request.resource.data.amountCents is int
+        && request.resource.data.amountCents > 0
+        && request.resource.data.type in ['expense', 'income']
+        && request.resource.data.classification in ['opex', 'capex', 'capital_injection', 'revenue']
+        && isOwnAuthorship(request.resource.data.createdBy);
+      allow update: if isFinanceStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /financeRecurringTemplates/{templateId} {
+      allow read: if isFinanceStaff();
+      allow create, update: if isFinanceStaff();
+      allow delete: if isAdmin();
     }
   }
 }

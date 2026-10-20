@@ -18,6 +18,7 @@ const PERMISSION_BADGES = [
   { key: 'pos', label: 'POS', color: 'text-cyan-300' },
   { key: 'inventory', label: 'Inventario', color: 'text-emerald-300' },
   { key: 'sales', label: 'Ventas', color: 'text-blue-300' },
+  { key: 'finance', label: 'Finanzas', color: 'text-amber-300' },
   { key: 'users', label: 'Usuarios', color: 'text-purple-300' },
 ];
 
